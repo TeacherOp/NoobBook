@@ -32,7 +32,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
     environment:
-      - VITE_API_URL=http://localhost:5000/api/v1
+      - VITE_API_URL=http://backend:5000/api/v1
     restart: unless-stopped
     depends_on:
       - backend

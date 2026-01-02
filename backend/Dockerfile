@@ -13,8 +13,14 @@ RUN apt-get update && apt-get install -y \
     g++ \
     libpq-dev \
     curl \
+    libreoffice \
+    ffmpeg \
+    wget \
     && rm -rf /var/lib/apt/lists/* \
     && pip install uv
+
+# Install playwright browsers
+RUN pip install playwright && playwright install --with-deps chromium
 
 WORKDIR /app
 
@@ -42,4 +48,4 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5000/health || exit 1
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "120", "app:create_app()"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "120", "run:app"]

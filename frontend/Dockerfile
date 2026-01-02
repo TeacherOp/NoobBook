@@ -20,6 +20,8 @@ CMD ["pnpm", "dev", "--host", "0.0.0.0"]
 
 # Build stage
 FROM base AS builder
+ARG VITE_API_URL=http://localhost:5000/api/v1
+ENV VITE_API_URL=$VITE_API_URL
 COPY frontend/package*.json frontend/pnpm-lock.yaml* ./
 RUN pnpm install && \
     pnpm rebuild esbuild

@@ -4,15 +4,17 @@ services:
       context: .
       dockerfile: backend/Dockerfile
       target: production
+    volumes:
+      - backend_data:/app/data
+    env_file:
+      - ./backend/.env
     environment:
       - FLASK_ENV=production
-    volumes:
-      - backend_data:/app/backend_data
     networks:
       - default
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/v1/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -22,10 +24,10 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
       target: production
+      args:
+        - VITE_API_URL=http://localhost/api/v1
     ports:
       - "80:8080"
-    environment:
-      - VITE_API_URL=http://localhost/api/v1
     depends_on:
       - backend
     restart: unless-stopped

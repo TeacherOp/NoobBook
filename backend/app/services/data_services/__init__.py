@@ -18,8 +18,9 @@ These services typically:
 from app.services.data_services.chat_service import chat_service
 from app.services.data_services.project_service import ProjectService
 from app.services.data_services.message_service import message_service
+from app.services.data_services.database_service import database_service
 
 # ProjectService needs to be instantiated fresh due to directory initialization
 project_service = ProjectService()
 
-__all__ = ["chat_service", "project_service", "message_service"]
+__all__ = ["chat_service", "project_service", "message_service", "database_service"]

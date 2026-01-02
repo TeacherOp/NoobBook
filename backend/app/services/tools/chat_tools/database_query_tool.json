@@ -1,0 +1,18 @@
+{
+  "name": "query_database",
+  "description": "Query a connected PostgreSQL database using natural language. Use this tool when the user asks questions that require data from their connected databases. The tool will convert the question to SQL and execute it safely.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "question": {
+        "type": "string",
+        "description": "The user's natural language question about the database data. Example: 'How many users signed up last month?' or 'What are the top 5 products by sales?'"
+      },
+      "connection_id": {
+        "type": "string",
+        "description": "The ID of the database connection to query. This should be provided in the project context or user should specify which database to use."
+      }
+    },
+    "required": ["question", "connection_id"]
+  }
+}

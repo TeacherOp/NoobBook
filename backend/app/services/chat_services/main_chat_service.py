@@ -23,6 +23,7 @@ from app.services.tool_executors import source_search_executor
 from app.services.tool_executors import memory_executor
 from app.services.tool_executors import csv_analyzer_agent_executor
 from app.services.tool_executors import studio_signal_executor
+from app.services.tool_executors import database_tool_executor
 from app.services.ai_services.chat_naming_service import chat_naming_service
 from app.services.background_services import task_service
 from app.utils import claude_parsing_utils
@@ -46,6 +47,7 @@ class MainChatService:
         self._memory_tool = None
         self._csv_analyzer_tool = None
         self._studio_signal_tool = None
+        self._database_tool = None
 
     def _get_search_tool(self) -> Dict[str, Any]:
         """Load the search_sources tool definition (cached)."""
@@ -71,17 +73,25 @@ class MainChatService:
             self._studio_signal_tool = tool_loader.load_tool("chat_tools", "studio_signal_tool")
         return self._studio_signal_tool
 
-    def _get_tools(self, has_active_sources: bool, has_csv_sources: bool = False) -> List[Dict[str, Any]]:
+    def _get_database_tool(self) -> Dict[str, Any]:
+        """Load the database_query tool definition (cached)."""
+        if self._database_tool is None:
+            self._database_tool = tool_loader.load_tool("chat_tools", "database_query_tool")
+        return self._database_tool
+
+    def _get_tools(self, has_active_sources: bool, has_csv_sources: bool = False, has_database_connections: bool = False) -> List[Dict[str, Any]]:
         """
         Get tools list for Claude API call.
 
         Educational Note: Memory and studio_signal tools are always available.
         Search tool is only available when there are active non-CSV sources.
         CSV analyzer tool is available when there are CSV sources.
+        Database tool is available when there are connected databases.
 
         Args:
             has_active_sources: Whether project has active non-CSV sources
             has_csv_sources: Whether project has active CSV sources
+            has_database_connections: Whether user has connected databases
 
         Returns:
             List of tool definitions
@@ -97,6 +107,9 @@ class MainChatService:
 
         if has_csv_sources:
             tools.append(self._get_csv_analyzer_tool())
+
+        if has_database_connections:
+            tools.append(self._get_database_tool())
 
         return tools
 
@@ -185,6 +198,24 @@ class MainChatService:
                 return result.get("message", "Studio signals activated")
             else:
                 return f"Error: {result.get('message', 'Unknown error')}"
+
+        elif tool_name == "query_database":
+            # Database query tool for answering questions using connected databases
+            result = database_tool_executor.execute(
+                tool_call={"name": tool_name, "input": tool_input},
+                project_id=project_id,
+                user_id="default_user"  # TODO: Get from auth context
+            )
+            if result.get("success"):
+                query_result = result.get("result", {})
+                content = f"Query: {query_result.get('question', '')}\n"
+                content += f"SQL: {query_result.get('sql_query', '')}\n"
+                content += f"Results: {query_result.get('summary', '')}"
+                if query_result.get('data'):
+                    content += f"\nSample data: {query_result['data'][:3]}"  # Show first 3 rows
+                return content
+            else:
+                return f"Error: {result.get('error', 'Database query failed')}"
 
         else:
             return f"Unknown tool: {tool_name}"

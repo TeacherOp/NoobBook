@@ -21,12 +21,14 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
+# Development base with playwright
+FROM base AS dev-base
+RUN pip install playwright && playwright install --with-deps chromium
+
 # Development stage
-FROM base AS development
+FROM dev-base AS development
 COPY backend/requirements.txt .
 RUN uv pip install --system -r requirements.txt
-# Install playwright browsers for development
-RUN pip install playwright && playwright install --with-deps chromium
 COPY backend/ .
 EXPOSE 5000
 CMD ["python", "run.py"]
@@ -44,7 +46,7 @@ RUN useradd --create-home --shell /bin/bash noobbook && \
 USER noobbook
 
 EXPOSE 5000
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:5000/api/v1/health || exit 1
 
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--workers", "4", "--timeout", "300", "run:app"]

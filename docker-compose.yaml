@@ -7,6 +7,10 @@ services:
     container_name: noobbook-backend
     ports:
       - "5000:5000"
+    env_file:
+      - ./backend/.env
+    volumes:
+      - backend_data:/app/data
     restart: unless-stopped
     networks:
       - noobbook_net
@@ -16,12 +20,17 @@ services:
       context: ./frontend
     container_name: noobbook-frontend
     ports:
-      - "5173:5173"
+      - "5173:80"
+    environment:
+      VITE_API_URL: http://backend:5000
     depends_on:
       - backend
     restart: unless-stopped
     networks:
       - noobbook_net
+
+volumes:
+  backend_data:
 
 networks:
   noobbook_net:

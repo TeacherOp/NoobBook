@@ -28,9 +28,11 @@ export const DatabaseTab: React.FC<DatabaseTabProps> = ({
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const isPasswordWeak = password.length > 0 && password.length < 8;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !host.trim() || !database.trim() || !username.trim()) return;
+    if (!name.trim() || !host.trim() || !database.trim() || !username.trim() || !password.trim()) return;
 
     setLoading(true);
     try {
@@ -62,6 +64,15 @@ export const DatabaseTab: React.FC<DatabaseTabProps> = ({
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Security Warning */}
+        {window.location.protocol !== 'https:' && (
+          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+            <p className="text-sm text-yellow-800">
+              ⚠️ Warning: Connection not secure. Database credentials will be transmitted over HTTP.
+            </p>
+          </div>
+        )}
+
         <div>
           <Label htmlFor="db-name">Display Name</Label>
           <Input
@@ -146,6 +157,11 @@ export const DatabaseTab: React.FC<DatabaseTabProps> = ({
             onChange={(e) => setPassword(e.target.value)}
             disabled={loading || isAtLimit}
           />
+          {isPasswordWeak && (
+            <p className="text-xs text-yellow-600 mt-1">
+              Warning: Password should be at least 8 characters for security
+            </p>
+          )}
         </div>
 
         <Button
@@ -156,7 +172,8 @@ export const DatabaseTab: React.FC<DatabaseTabProps> = ({
             !name.trim() ||
             !host.trim() ||
             !database.trim() ||
-            !username.trim()
+            !username.trim() ||
+            !password.trim()
           }
           className="w-full"
         >

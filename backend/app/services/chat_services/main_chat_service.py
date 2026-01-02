@@ -201,18 +201,16 @@ class MainChatService:
 
         elif tool_name == "query_database":
             # Database query tool for answering questions using connected databases
-            result = database_tool_executor.execute(
-                tool_call={"name": tool_name, "input": tool_input},
-                project_id=project_id,
-                user_id="default_user"  # TODO: Get from auth context
+            result = database_tool_executor(
+                tool_call=tool_input,
+                project_id=project_id
             )
             if result.get("success"):
-                query_result = result.get("result", {})
-                content = f"Query: {query_result.get('question', '')}\n"
-                content += f"SQL: {query_result.get('sql_query', '')}\n"
-                content += f"Results: {query_result.get('summary', '')}"
-                if query_result.get('data'):
-                    content += f"\nSample data: {query_result['data'][:3]}"  # Show first 3 rows
+                content = f"SQL Query: {result.get('sql_query', '')}\n"
+                content += f"Summary: {result.get('summary', '')}\n"
+                query_results = result.get('results', {})
+                if query_results.get('rows'):
+                    content += f"Found {query_results.get('row_count', 0)} results"
                 return content
             else:
                 return f"Error: {result.get('error', 'Database query failed')}"

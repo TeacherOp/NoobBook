@@ -6,15 +6,30 @@ and provides secure query execution with schema processing for RAG integration.
 """
 import json
 import logging
+import os
+import base64
 from datetime import datetime
 from typing import Dict, Any, List
 from urllib.parse import urlparse
+
+try:
+    from cryptography.fernet import Fernet
+    CRYPTO_AVAILABLE = True
+except ImportError:
+    CRYPTO_AVAILABLE = False
 
 try:
     from sqlalchemy import create_engine, text, inspect
     POSTGRES_AVAILABLE = True
 except ImportError:
     POSTGRES_AVAILABLE = False
+
+try:
+    import pymysql
+    import sqlparse
+    MYSQL_AVAILABLE = True
+except ImportError:
+    MYSQL_AVAILABLE = False
 
 from app.utils.path_utils import get_data_dir
 
@@ -28,8 +43,51 @@ class DatabaseService:
 
     def __init__(self):
         self.connections = {}
-        if POSTGRES_AVAILABLE:
+        if POSTGRES_AVAILABLE or MYSQL_AVAILABLE:
             self._load_connections()
+        
+        # Initialize encryption key
+        self._init_encryption_key()
+
+    def _init_encryption_key(self):
+        """Initialize encryption key for connection strings."""
+        if not CRYPTO_AVAILABLE:
+            self._cipher = None
+            return
+            
+        key_file = get_data_dir() / "db_key.key"
+        if key_file.exists():
+            with open(key_file, 'rb') as f:
+                key = f.read()
+        else:
+            key = Fernet.generate_key()
+            key_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(key_file, 'wb') as f:
+                f.write(key)
+            # Set restrictive permissions
+            os.chmod(key_file, 0o600)
+        
+        self._cipher = Fernet(key)
+
+    def _encrypt_connection_string(self, connection_string: str) -> str:
+        """Encrypt connection string."""
+        if not self._cipher:
+            return connection_string  # Fallback to plaintext if crypto unavailable
+        
+        encrypted = self._cipher.encrypt(connection_string.encode())
+        return base64.b64encode(encrypted).decode()
+
+    def _decrypt_connection_string(self, encrypted_string: str) -> str:
+        """Decrypt connection string."""
+        if not self._cipher:
+            return encrypted_string  # Fallback to plaintext if crypto unavailable
+        
+        try:
+            encrypted = base64.b64decode(encrypted_string.encode())
+            return self._cipher.decrypt(encrypted).decode()
+        except Exception:
+            # Might be plaintext from before encryption was added
+            return encrypted_string
 
     def _check_availability(self):
         """Check if PostgreSQL dependencies are available."""
@@ -56,6 +114,30 @@ class DatabaseService:
                 json.dump(self.connections, f, indent=2)
         except Exception as e:
             logger.error(f"Error saving database connections: {e}")
+
+    def _detect_database_type(self, connection_string: str) -> str:
+        """Detect database type from connection string."""
+        if connection_string.startswith('postgresql://') or connection_string.startswith('postgres://'):
+            return 'postgresql'
+        elif connection_string.startswith('mysql://') or connection_string.startswith('mysql+pymysql://'):
+            return 'mysql'
+        else:
+            parsed = urlparse(connection_string)
+            if parsed.scheme in ['postgresql', 'postgres']:
+                return 'postgresql'
+            elif parsed.scheme in ['mysql']:
+                return 'mysql'
+            return 'unknown'
+
+    def _validate_database_support(self, db_type: str) -> Dict[str, Any]:
+        """Validate if the detected database type is supported."""
+        if db_type == 'postgresql' and not POSTGRES_AVAILABLE:
+            return {"success": False, "error": "PostgreSQL dependencies not installed"}
+        elif db_type == 'mysql' and not MYSQL_AVAILABLE:
+            return {"success": False, "error": "MySQL dependencies not installed"}
+        elif db_type == 'unknown':
+            return {"success": False, "error": "Unsupported database type"}
+        return {"success": True}
 
     def _test_connection(self, connection_string: str, db_type: str) -> Dict[str, Any]:
         """Test database connection."""
@@ -121,7 +203,7 @@ class DatabaseService:
                 "id": connection_id,
                 "name": name,
                 "user_id": user_id,
-                "connection_string": connection_string,
+                "connection_string": self._encrypt_connection_string(connection_string),
                 "host": parsed.hostname,
                 "database": parsed.path.lstrip('/'),
                 "created_at": datetime.now().isoformat()
@@ -173,19 +255,41 @@ class DatabaseService:
             if conn_data["user_id"] != user_id:
                 return {"success": False, "error": "Access denied"}
             
-            # Validate query is SELECT only using SQL parsing
-            query_stripped = query.strip()
-            if not query_stripped.upper().startswith('SELECT'):
-                return {"success": False, "error": "Only SELECT queries are allowed"}
+            # Validate query using proper SQL parsing
+            try:
+                parsed = sqlparse.parse(query)
+                if not parsed:
+                    return {"success": False, "error": "Invalid SQL query"}
+                
+                # Check if it's a single SELECT statement
+                statements = [stmt for stmt in parsed if stmt.ttype is None]
+                if len(statements) != 1:
+                    return {"success": False, "error": "Only single statements allowed"}
+                
+                # Get first token that's not whitespace/comment
+                first_token = None
+                for token in statements[0].flatten():
+                    if token.ttype not in (sqlparse.tokens.Whitespace, sqlparse.tokens.Comment.Single, sqlparse.tokens.Comment.Multiline):
+                        first_token = token
+                        break
+                
+                if not first_token or first_token.value.upper() != 'SELECT':
+                    return {"success": False, "error": "Only SELECT queries are allowed"}
+                    
+            except Exception:
+                # Fallback to basic validation if sqlparse fails
+                query_stripped = query.strip()
+                query_upper = query_stripped.upper()
+                if not query_upper.startswith('SELECT'):
+                    return {"success": False, "error": "Only SELECT queries are allowed"}
+                
+                if ';' in query_stripped[:-1]:
+                    return {"success": False, "error": "Multiple statements not allowed"}
             
-            # Basic check for multiple statements (prevent injection)
-            if ';' in query_stripped[:-1]:  # Allow trailing semicolon
-                return {"success": False, "error": "Multiple statements not allowed"}
-            
-            engine = create_engine(conn_data["connection_string"], pool_timeout=10, connect_args={"connect_timeout": 30})
+            engine = create_engine(self._decrypt_connection_string(conn_data["connection_string"]), pool_timeout=10, connect_args={"connect_timeout": 30})
             with engine.connect() as conn:
-                # Set query timeout (30 seconds)
-                result = conn.execute(text(query).execution_options(autocommit=True, compiled_cache={}))
+                # Execute query with timeout
+                result = conn.execute(text(query))
                 rows = result.fetchall()
                 columns = list(result.keys())
             
@@ -216,7 +320,7 @@ class DatabaseService:
             if conn_data["user_id"] != user_id:
                 return {"success": False, "error": "Access denied"}
             
-            engine = create_engine(conn_data["connection_string"])
+            engine = create_engine(self._decrypt_connection_string(conn_data["connection_string"]))
             inspector = inspect(engine)
             
             schema_info = {"tables": [], "summary": ""}

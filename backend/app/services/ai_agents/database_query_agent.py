@@ -73,8 +73,9 @@ Available schema information will be provided in the context."""
             else:
                 query = str(response).strip()
             
-            # Basic validation
-            if not query.lower().startswith('select'):
+            # Basic validation - normalize whitespace and check case-insensitive
+            query_normalized = ' '.join(query.split()).strip()
+            if not query_normalized.upper().startswith('SELECT'):
                 return {"success": False, "error": "Generated query is not a SELECT statement"}
             
             return {"success": True, "query": query}

@@ -9,7 +9,7 @@ from app.services.ai_agents.database_query_agent import database_query_agent
 logger = logging.getLogger(__name__)
 
 
-def execute_database_tool(tool_call: Dict[str, Any], project_id: str) -> Dict[str, Any]:
+def execute_database_tool(tool_call: Dict[str, Any], project_id: str, user_id: str = "default_user") -> Dict[str, Any]:
     """
     Execute database query tool from chat.
     
@@ -27,8 +27,8 @@ def execute_database_tool(tool_call: Dict[str, Any], project_id: str) -> Dict[st
         if not connection_id or not question:
             return {"error": "connection_id and question are required"}
         
-        # Use default user for now - TODO: get from auth
-        result = database_query_agent.answer_question(question, connection_id, "default_user")
+        # Use provided user_id for proper access control
+        result = database_query_agent.answer_question(question, connection_id, user_id, project_id)
         
         if result["success"]:
             return {

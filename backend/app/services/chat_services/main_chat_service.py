@@ -203,7 +203,8 @@ class MainChatService:
             # Database query tool for answering questions using connected databases
             result = database_tool_executor(
                 tool_call=tool_input,
-                project_id=project_id
+                project_id=project_id,
+                user_id="default_user"  # TODO: Get from auth context
             )
             if result.get("success"):
                 content = f"SQL Query: {result.get('sql_query', '')}\n"

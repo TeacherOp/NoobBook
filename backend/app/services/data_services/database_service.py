@@ -35,6 +35,9 @@ from app.utils.path_utils import get_data_dir
 
 logger = logging.getLogger(__name__)
 
+# Configuration constants
+MAX_QUERY_ROWS = 10000  # Maximum rows to prevent memory issues
+
 
 class DatabaseService:
     """
@@ -193,9 +196,16 @@ class DatabaseService:
             return availability_check
             
         try:
-            engine = create_engine(connection_string)
-            with engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
+            # Detect and validate database type
+            db_type = self._detect_database_type(connection_string)
+            validation = self._validate_database_support(db_type)
+            if not validation["success"]:
+                return validation
+            
+            # Test connection with proper timeout
+            test_result = self._test_connection(connection_string, db_type)
+            if not test_result["success"]:
+                return test_result
             
             parsed = urlparse(connection_string)
             connection_id = f"{user_id}_{name}"
@@ -216,6 +226,7 @@ class DatabaseService:
                 "connection": {
                     "id": connection_id,
                     "name": name,
+                    "db_type": db_type,
                     "host": parsed.hostname,
                     "database": parsed.path.lstrip('/')
                 }
@@ -288,10 +299,15 @@ class DatabaseService:
             
             engine = create_engine(self._decrypt_connection_string(conn_data["connection_string"]), pool_timeout=10, connect_args={"connect_timeout": 30})
             with engine.connect() as conn:
-                # Execute query with timeout
+                # Execute query with row limit protection
                 result = conn.execute(text(query))
-                rows = result.fetchall()
+                rows = result.fetchmany(MAX_QUERY_ROWS + 1)  # Fetch one extra to check if truncated
                 columns = list(result.keys())
+                
+                # Check if results were truncated
+                truncated = len(rows) > MAX_QUERY_ROWS
+                if truncated:
+                    rows = rows[:MAX_QUERY_ROWS]  # Remove the extra row
             
             engine.dispose()  # Properly close engine
                 
@@ -299,7 +315,9 @@ class DatabaseService:
                 "success": True,
                 "columns": columns,
                 "rows": [dict(row._mapping) for row in rows],
-                "row_count": len(rows)
+                "row_count": len(rows),
+                "truncated": truncated,
+                "max_rows": MAX_QUERY_ROWS if truncated else None
             }
                 
         except Exception as e:
@@ -346,6 +364,8 @@ class DatabaseService:
                 summary_parts.append(f"Table {table['name']}: {', '.join(col_names)}")
             
             schema_info["summary"] = "\n".join(summary_parts)
+            
+            engine.dispose()  # Properly dispose engine
             
             return {"success": True, "schema": schema_info}
             

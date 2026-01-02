@@ -39,7 +39,7 @@ def upload_database(project_id: str, name: str, connection_string: str) -> Dict[
         # Parse connection for metadata
         parsed = urlparse(connection_string)
         
-        # Create source entry
+        # Create source entry with encrypted connection string
         source_data = {
             "name": name,
             "type": "database",
@@ -48,7 +48,7 @@ def upload_database(project_id: str, name: str, connection_string: str) -> Dict[
                 "db_type": db_type,
                 "host": parsed.hostname,
                 "database": parsed.path.lstrip('/'),
-                "connection_string": connection_string  # Store securely in real implementation
+                "connection_string": database_service._encrypt_connection_string(connection_string)
             }
         }
         
@@ -94,8 +94,9 @@ def _process_database_schema(project_id: str, source_id: str, connection_string:
         Processing result
     """
     try:
-        # Get schema information
-        schema_result = database_service._get_schema_direct(connection_string, db_type)
+        # Get schema information using decrypted connection string
+        decrypted_connection = database_service._decrypt_connection_string(connection_string)
+        schema_result = database_service._get_schema_direct(decrypted_connection, db_type)
         if not schema_result["success"]:
             return schema_result
         

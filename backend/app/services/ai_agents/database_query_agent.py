@@ -35,7 +35,7 @@ Rules:
 
 Available schema information will be provided in the context."""
 
-    def generate_query(self, question: str, schema_info: Dict[str, Any]) -> Dict[str, Any]:
+    def generate_query(self, question: str, schema_info: Dict[str, Any], project_id: str = None) -> Dict[str, Any]:
         """
         Generate SQL query from natural language question.
         
@@ -64,7 +64,7 @@ Available schema information will be provided in the context."""
                 messages=messages,
                 system_prompt=self.system_prompt,
                 max_tokens=500,
-                project_id="database_query"  # Add project_id for cost tracking
+                project_id=project_id or "database_query"  # Use provided project_id or fallback
             )
 
             # Extract SQL query from response
@@ -84,7 +84,7 @@ Available schema information will be provided in the context."""
             logger.error(f"Error generating SQL query: {e}")
             return {"success": False, "error": str(e)}
 
-    def answer_question(self, question: str, connection_id: str, user_id: str) -> Dict[str, Any]:
+    def answer_question(self, question: str, connection_id: str, user_id: str, project_id: str = None) -> Dict[str, Any]:
         """
         Answer a natural language question using database queries.
         
@@ -105,7 +105,7 @@ Available schema information will be provided in the context."""
             schema_info = schema_result["schema"]
             
             # Generate SQL query
-            query_result = self.generate_query(question, schema_info)
+            query_result = self.generate_query(question, schema_info, project_id)
             if not query_result["success"]:
                 return query_result
 

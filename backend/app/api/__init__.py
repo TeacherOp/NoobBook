@@ -39,6 +39,7 @@ from app.api.transcription import transcription_bp
 from app.api.settings import settings_bp
 from app.api.sources import sources_bp
 from app.api.studio import studio_bp
+from app.api.health import health_bp
 
 # Register nested blueprints with the main api blueprint
 # No url_prefix needed - routes already have full paths
@@ -51,3 +52,4 @@ api_bp.register_blueprint(transcription_bp)
 api_bp.register_blueprint(settings_bp)
 api_bp.register_blueprint(sources_bp)
 api_bp.register_blueprint(studio_bp)
+api_bp.register_blueprint(health_bp)

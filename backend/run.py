@@ -82,5 +82,6 @@ if __name__ == '__main__':
         host='0.0.0.0',  # Allow connections from any IP
         port=port,
         debug=debug,
-        use_reloader=debug  # Auto-reload on code changes in debug mode
+        use_reloader=debug,  # Auto-reload on code changes in debug mode
+        allow_unsafe_werkzeug=True  # Allow Werkzeug in development
     )

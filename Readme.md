@@ -167,19 +167,62 @@ Data Storage (JSON files)
 
 ## Running Locally
 
-### Prerequisites
+NoobBook offers multiple ways to run the application based on your needs:
+
+### 🚀 Quick Start (Recommended for New Users)
 
 ```bash
-# macOS
+git clone https://github.com/yourusername/NoobBook.git
+cd NoobBook
+make quick-start
+```
+
+This will automatically set up and start NoobBook using Docker containers.
+
+**Access the application:**
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:5000
+
+### ⚡ Local Development (Fastest for Development)
+
+For active development with immediate code changes:
+
+```bash
+make setup          # One-time setup
+make dev-local      # Start both backend and frontend
+```
+
+**Or start services separately:**
+```bash
+make dev-backend    # Terminal 1: Backend only
+make dev-frontend   # Terminal 2: Frontend only
+```
+
+### 🐳 Docker Development
+
+For containerized development environment:
+
+```bash
+make docker-dev     # Start with Docker containers
+```
+
+### 📋 Manual Setup (If you prefer manual control)
+
+#### Prerequisites
+
+**macOS:**
+```bash
 brew install libreoffice ffmpeg
 npx playwright install
+```
 
-# Ubuntu/Debian
+**Ubuntu/Debian:**
+```bash
 sudo apt install libreoffice ffmpeg
 npx playwright install
 ```
 
-### Backend
+#### Backend
 
 ```bash
 cd backend
@@ -189,13 +232,39 @@ pip install -r requirements.txt
 python run.py             # http://localhost:5000
 ```
 
-### Frontend
+#### Frontend
 
 ```bash
 cd frontend
 npm install
 npm run dev               # http://localhost:5173
 ```
+
+## Production Deployment
+
+### 🏭 Docker Production (Recommended)
+
+```bash
+make deploy-prod
+```
+
+This creates optimized production builds with:
+- Gunicorn WSGI server for backend
+- Nginx serving frontend with reverse proxy
+- Health checks and monitoring
+- Security hardening
+
+### 📊 Available Commands
+
+```bash
+make help           # Show all available commands
+make logs           # View application logs  
+make health         # Check service health
+make stop           # Stop all services
+make clean          # Clean up containers
+```
+
+For detailed Docker documentation, see [DOCKER.md](DOCKER.md).
 
 ### API Keys
 
@@ -210,6 +279,43 @@ Create `backend/.env` or configure in **Dashboard -> Settings**:
 - `ELEVENLABS_API_KEY` - Audio features
 - `TAVILY_API_KEY` - Web search
 - `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` - Google Drive import
+
+## Development Workflow
+
+### Choose Your Development Style
+
+**🔥 Fast Local Development** (Recommended for coding):
+```bash
+make dev-local    # Instant code changes, faster startup
+```
+
+**🐳 Docker Development** (Recommended for testing):
+```bash
+make docker-dev   # Consistent environment, slower startup
+```
+
+**🚀 Production Testing**:
+```bash
+make deploy-prod  # Test production configuration
+```
+
+### Common Commands
+
+```bash
+make help         # Show all available commands
+make logs         # View application logs
+make test         # Run test suite
+make clean        # Clean up everything
+make restart      # Restart development environment
+```
+
+### Debugging
+
+```bash
+make shell-backend   # Access backend container
+make shell-frontend  # Access frontend container
+make health         # Check service health
+```
 
 ---
 

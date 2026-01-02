@@ -205,7 +205,7 @@ docker build -t noobbook-frontend:1 .
 docker run -it -p 5173:5173 noobbook-frontend:1
 ```
 
-### Run Docker Image (Frontend)
+### Run Docker Image (Backend)
 
 ```bash
 cd backend

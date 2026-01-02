@@ -19,7 +19,8 @@ from app.services.source_services.source_upload import (
     create_from_existing_file,
     upload_url,
     upload_text,
-    upload_research
+    upload_research,
+    upload_database
 )
 from app.utils.path_utils import (
     get_raw_dir,
@@ -315,6 +316,19 @@ class SourceService:
         Delegates to source_upload.research_upload module.
         """
         return upload_research(project_id, topic, description, links)
+
+    def upload_database(
+        self,
+        project_id: str,
+        name: str,
+        connection_string: str
+    ) -> Dict[str, Any]:
+        """
+        Add a database connection as a source to a project.
+
+        Delegates to source_upload.database_upload module.
+        """
+        return upload_database(project_id, name, connection_string)
 
     # =========================================================================
     # Processing Delegation (thin wrappers)

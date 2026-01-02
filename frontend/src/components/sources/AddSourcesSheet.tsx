@@ -12,6 +12,7 @@ import { LinkTab } from './LinkTab';
 import { PasteTab } from './PasteTab';
 import { GoogleDriveTab } from './GoogleDriveTab';
 import { ResearchTab } from './ResearchTab';
+import { DatabaseTab } from './DatabaseTab';
 import { MAX_SOURCES } from '../../lib/api/sources';
 
 interface AddSourcesSheetProps {
@@ -23,6 +24,7 @@ interface AddSourcesSheetProps {
   onAddUrl: (url: string) => Promise<void>;
   onAddText: (content: string, name: string) => Promise<void>;
   onAddResearch: (topic: string, description: string, links: string[]) => Promise<void>;
+  onAddDatabase: (name: string, connectionString: string) => Promise<void>;
   onImportComplete: () => void;
   uploading: boolean;
 }
@@ -36,6 +38,7 @@ export const AddSourcesSheet: React.FC<AddSourcesSheetProps> = ({
   onAddUrl,
   onAddText,
   onAddResearch,
+  onAddDatabase,
   onImportComplete,
   uploading,
 }) => {
@@ -55,12 +58,13 @@ export const AddSourcesSheet: React.FC<AddSourcesSheetProps> = ({
           </p>
 
           <Tabs defaultValue="upload" className="w-full">
-            <TabsList className="grid w-full grid-cols-5">
-              <TabsTrigger value="upload" className="hover:bg-[#e8e7e4] data-[state=active]:bg-[#dcdbd8]">Upload</TabsTrigger>
-              <TabsTrigger value="link" className="hover:bg-[#e8e7e4] data-[state=active]:bg-[#dcdbd8]">Link</TabsTrigger>
-              <TabsTrigger value="paste" className="hover:bg-[#e8e7e4] data-[state=active]:bg-[#dcdbd8]">Paste</TabsTrigger>
-              <TabsTrigger value="drive" className="hover:bg-[#e8e7e4] data-[state=active]:bg-[#dcdbd8]">Drive</TabsTrigger>
-              <TabsTrigger value="research" className="hover:bg-[#e8e7e4] data-[state=active]:bg-[#dcdbd8]">Research</TabsTrigger>
+            <TabsList className="grid w-full grid-cols-6">
+              <TabsTrigger value="upload" className="hover:bg-[#e8e7e4] data-[state=active]:bg-[#dcdbd8] text-xs">Upload</TabsTrigger>
+              <TabsTrigger value="link" className="hover:bg-[#e8e7e4] data-[state=active]:bg-[#dcdbd8] text-xs">Link</TabsTrigger>
+              <TabsTrigger value="paste" className="hover:bg-[#e8e7e4] data-[state=active]:bg-[#dcdbd8] text-xs">Paste</TabsTrigger>
+              <TabsTrigger value="drive" className="hover:bg-[#e8e7e4] data-[state=active]:bg-[#dcdbd8] text-xs">Drive</TabsTrigger>
+              <TabsTrigger value="research" className="hover:bg-[#e8e7e4] data-[state=active]:bg-[#dcdbd8] text-xs">Research</TabsTrigger>
+              <TabsTrigger value="database" className="hover:bg-[#e8e7e4] data-[state=active]:bg-[#dcdbd8] text-xs">DB</TabsTrigger>
             </TabsList>
 
             <TabsContent value="upload" className="mt-6">
@@ -77,6 +81,10 @@ export const AddSourcesSheet: React.FC<AddSourcesSheetProps> = ({
 
             <TabsContent value="paste" className="mt-6">
               <PasteTab onAddText={onAddText} isAtLimit={isAtLimit} />
+            </TabsContent>
+
+            <TabsContent value="database" className="mt-6">
+              <DatabaseTab onAddDatabase={onAddDatabase} isAtLimit={isAtLimit} />
             </TabsContent>
 
             <TabsContent value="drive" className="mt-6">

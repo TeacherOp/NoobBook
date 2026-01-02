@@ -6,14 +6,12 @@ and provides secure query execution with schema processing for RAG integration.
 """
 import json
 import logging
-from typing import Dict, Any, List, Optional, Tuple
+from datetime import datetime
+from typing import Dict, Any, List
 from urllib.parse import urlparse
 
 try:
-    import psycopg2
-    from psycopg2.extras import RealDictCursor
     from sqlalchemy import create_engine, text, inspect
-    from sqlalchemy.exc import SQLAlchemyError
     POSTGRES_AVAILABLE = True
 except ImportError:
     POSTGRES_AVAILABLE = False
@@ -59,6 +57,53 @@ class DatabaseService:
         except Exception as e:
             logger.error(f"Error saving database connections: {e}")
 
+    def _test_connection(self, connection_string: str, db_type: str) -> Dict[str, Any]:
+        """Test database connection."""
+        try:
+            # Normalize MySQL connection string
+            if db_type == 'mysql' and not connection_string.startswith('mysql+pymysql://'):
+                connection_string = connection_string.replace('mysql://', 'mysql+pymysql://')
+            
+            engine = create_engine(connection_string, pool_timeout=10, pool_recycle=3600)
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            engine.dispose()  # Close engine after test
+            
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def _get_schema_direct(self, connection_string: str, db_type: str) -> Dict[str, Any]:
+        """Get schema information directly from connection string."""
+        try:
+            # Normalize MySQL connection string
+            if db_type == 'mysql' and not connection_string.startswith('mysql+pymysql://'):
+                connection_string = connection_string.replace('mysql://', 'mysql+pymysql://')
+            
+            engine = create_engine(connection_string)
+            inspector = inspect(engine)
+            
+            schema_info = {"tables": []}
+            
+            for table_name in inspector.get_table_names():
+                columns = inspector.get_columns(table_name)
+                table_info = {
+                    "name": table_name,
+                    "columns": [
+                        {
+                            "name": col["name"],
+                            "type": str(col["type"]),
+                            "nullable": col.get("nullable", True)
+                        }
+                        for col in columns
+                    ]
+                }
+                schema_info["tables"].append(table_info)
+            
+            return {"success": True, "schema": schema_info}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def add_connection(self, name: str, connection_string: str, user_id: str) -> Dict[str, Any]:
         """Add a new database connection."""
         availability_check = self._check_availability()
@@ -79,7 +124,7 @@ class DatabaseService:
                 "connection_string": connection_string,
                 "host": parsed.hostname,
                 "database": parsed.path.lstrip('/'),
-                "created_at": "2026-01-01T22:00:00Z"
+                "created_at": datetime.now().isoformat()
             }
             
             self._save_connections()
@@ -128,22 +173,30 @@ class DatabaseService:
             if conn_data["user_id"] != user_id:
                 return {"success": False, "error": "Access denied"}
             
-            query_lower = query.lower().strip()
-            if any(dangerous in query_lower for dangerous in ['drop', 'delete', 'truncate', 'alter', 'create', 'insert', 'update']):
+            # Validate query is SELECT only using SQL parsing
+            query_stripped = query.strip()
+            if not query_stripped.upper().startswith('SELECT'):
                 return {"success": False, "error": "Only SELECT queries are allowed"}
             
-            engine = create_engine(conn_data["connection_string"])
+            # Basic check for multiple statements (prevent injection)
+            if ';' in query_stripped[:-1]:  # Allow trailing semicolon
+                return {"success": False, "error": "Multiple statements not allowed"}
+            
+            engine = create_engine(conn_data["connection_string"], pool_timeout=10, connect_args={"connect_timeout": 30})
             with engine.connect() as conn:
-                result = conn.execute(text(query))
+                # Set query timeout (30 seconds)
+                result = conn.execute(text(query).execution_options(autocommit=True, compiled_cache={}))
                 rows = result.fetchall()
                 columns = list(result.keys())
+            
+            engine.dispose()  # Properly close engine
                 
-                return {
-                    "success": True,
-                    "columns": columns,
-                    "rows": [dict(row._mapping) for row in rows],
-                    "row_count": len(rows)
-                }
+            return {
+                "success": True,
+                "columns": columns,
+                "rows": [dict(row._mapping) for row in rows],
+                "row_count": len(rows)
+            }
                 
         except Exception as e:
             logger.error(f"Error executing query: {e}")

@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { ProjectList } from '../project';
 import { AppSettings } from './AppSettings';
-import { DatabaseConnections } from './DatabaseConnections';
 import { Button } from '../ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { Gear, Ghost, Sparkle, GithubLogo, YoutubeLogo, BookOpen, Database } from '@phosphor-icons/react';
+import { Gear, Ghost, Sparkle, GithubLogo, YoutubeLogo, BookOpen } from '@phosphor-icons/react';
 import { ToastContainer, useToast } from '../ui/toast';
 
 /**
@@ -26,7 +25,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   refreshTrigger = 0
 }) => {
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
-  const [databaseConnectionsOpen, setDatabaseConnectionsOpen] = useState(false);
   const { toasts, dismissToast } = useToast();
 
   return (
@@ -43,16 +41,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setDatabaseConnectionsOpen(true)}
-              className="gap-2"
-            >
-              <Database size={16} />
-              Databases
-            </Button>
-            
             <Button
               variant="outline"
               size="sm"
@@ -147,12 +135,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* App Settings Dialog */}
       <AppSettings open={appSettingsOpen} onOpenChange={setAppSettingsOpen} />
-      
-      {/* Database Connections Dialog */}
-      <DatabaseConnections 
-        isOpen={databaseConnectionsOpen} 
-        onClose={() => setDatabaseConnectionsOpen(false)} 
-      />
     </div>
   );
 };

@@ -29,6 +29,7 @@ from app.services.tool_executors.studio_audio_executor import studio_audio_execu
 from app.services.tool_executors.email_agent_executor import email_agent_executor
 from app.services.tool_executors.website_agent_executor import website_agent_executor
 from app.services.tool_executors.presentation_agent_executor import presentation_agent_executor
+from app.services.tool_executors.database_tool_executor import execute_database_tool
 
 __all__ = [
     "memory_executor",
@@ -40,5 +41,6 @@ __all__ = [
     "studio_audio_executor",
     "email_agent_executor",
     "website_agent_executor",
-    "presentation_agent_executor"
+    "presentation_agent_executor",
+    "execute_database_tool"
 ]

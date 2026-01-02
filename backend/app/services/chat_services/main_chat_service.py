@@ -261,9 +261,14 @@ class MainChatService:
         # Separate CSV sources from other sources
         csv_sources = [s for s in active_sources if s.get("file_extension") == ".csv"]
         non_csv_sources = [s for s in active_sources if s.get("file_extension") != ".csv"]
+        
+        # Check for database sources
+        database_sources = [s for s in active_sources if s.get("type") == "database"]
+        
         tools = self._get_tools(
             has_active_sources=bool(non_csv_sources),
-            has_csv_sources=bool(csv_sources)
+            has_csv_sources=bool(csv_sources),
+            has_database_connections=bool(database_sources)
         )
 
         try:

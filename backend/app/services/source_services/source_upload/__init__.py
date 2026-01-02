@@ -14,11 +14,13 @@ from app.services.source_services.source_upload.file_upload import (
 from app.services.source_services.source_upload.url_upload import upload_url
 from app.services.source_services.source_upload.text_upload import upload_text
 from app.services.source_services.source_upload.research_upload import upload_research
+from app.services.source_services.source_upload.database_upload import upload_database
 
 __all__ = [
     "upload_file",
     "create_from_existing_file",
     "upload_url",
     "upload_text",
-    "upload_research"
+    "upload_research",
+    "upload_database"
 ]

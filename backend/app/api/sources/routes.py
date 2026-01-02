@@ -39,6 +39,34 @@ from app.services.source_services import SourceService
 source_service = SourceService()
 
 
+@sources_bp.route('/projects/<project_id>/sources/database', methods=['POST'])
+def add_database_source(project_id: str):
+    """
+    Add a database connection as a source.
+    
+    Educational Note: Treats database connections as sources within projects,
+    allowing users to chat with database content through RAG.
+    """
+    try:
+        data = request.get_json()
+        name = data.get('name')
+        connection_string = data.get('connection_string')
+        
+        if not name or not connection_string:
+            return jsonify({"error": "Name and connection_string are required"}), 400
+        
+        result = source_service.upload_database(project_id, name, connection_string)
+        
+        if result["success"]:
+            return jsonify(result), 201
+        else:
+            return jsonify({"error": result["error"]}), 400
+            
+    except Exception as e:
+        current_app.logger.error(f"Error adding database source: {e}")
+        return jsonify({"error": "Internal server error"}), 500
+
+
 @sources_bp.route('/projects/<project_id>/sources', methods=['GET'])
 def list_sources(project_id: str):
     """

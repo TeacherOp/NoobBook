@@ -60,14 +60,18 @@ Available schema information will be provided in the context."""
                 {"role": "user", "content": f"{schema_context}\nQuestion: {question}\n\nGenerate a SQL query to answer this question:"}
             ]
 
-            response = claude_service.generate_response(
+            response = claude_service.send_message(
                 messages=messages,
                 system_prompt=self.system_prompt,
-                max_tokens=500
+                max_tokens=500,
+                project_id="database_query"  # Add project_id for cost tracking
             )
 
             # Extract SQL query from response
-            query = response.strip()
+            if isinstance(response, dict) and 'content' in response:
+                query = response['content'][0]['text'].strip() if response['content'] else ""
+            else:
+                query = str(response).strip()
             
             # Basic validation
             if not query.lower().startswith('select'):

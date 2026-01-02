@@ -23,7 +23,7 @@ export interface Source {
   name: string;
   original_filename: string;
   description: string;
-  category: 'document' | 'audio' | 'image' | 'data' | 'link';
+  category: 'document' | 'audio' | 'image' | 'data' | 'link' | 'database';
   mime_type: string;
   file_extension: string;
   file_size: number;
@@ -319,6 +319,28 @@ class SourcesAPI {
       return response.data.source;
     } catch (error) {
       console.error('Error adding research source:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Add a database connection as a source
+   * Educational Note: Connects to PostgreSQL or MySQL databases and
+   * processes schema information for RAG-based querying.
+   */
+  async addDatabaseSource(
+    projectId: string,
+    name: string,
+    connectionString: string
+  ): Promise<Source> {
+    try {
+      const response = await axios.post(
+        `${API_BASE_URL}/projects/${projectId}/sources/database`,
+        { name, connection_string: connectionString }
+      );
+      return response.data.source;
+    } catch (error) {
+      console.error('Error adding database source:', error);
       throw error;
     }
   }

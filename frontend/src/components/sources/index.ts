@@ -12,3 +12,4 @@ export { AddSourcesSheet } from './AddSourcesSheet';
 export { UploadTab } from './UploadTab';
 export { LinkTab } from './LinkTab';
 export { PasteTab } from './PasteTab';
+export { DatabaseTab } from './DatabaseTab';

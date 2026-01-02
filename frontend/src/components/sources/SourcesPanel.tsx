@@ -46,6 +46,7 @@ import {
   Video,
   YoutubeLogo,
   CaretRight,
+  Database,
 } from '@phosphor-icons/react';
 
 interface SourcesPanelProps {
@@ -75,6 +76,7 @@ const getSourceIcon = (source: Source) => {
   if (ext.includes('mp3') || ext.includes('wav') || ext.includes('m4a')) return MusicNote;
   if (ext.includes('mp4') || ext.includes('mov')) return Video;
   if (source.category === 'link') return Link;
+  if (source.category === 'database') return Database;
 
   return File;
 };
@@ -321,6 +323,35 @@ export const SourcesPanel: React.FC<SourcesPanelProps> = ({ projectId, isCollaps
   };
 
   /**
+   * Handle adding database source
+   * Educational Note: Connects to PostgreSQL or MySQL databases and
+   * processes schema information for RAG-based querying.
+   */
+  const handleAddDatabase = async (name: string, connectionString: string) => {
+    // Check source limit
+    if (sources.length >= MAX_SOURCES) {
+      error(`Cannot add. Maximum ${MAX_SOURCES} sources allowed.`);
+      return;
+    }
+
+    try {
+      await sourcesAPI.addDatabaseSource(projectId, name, connectionString);
+      success('Database connection added successfully');
+      await loadSources();
+      setSheetOpen(false);
+    } catch (err: unknown) {
+      console.error('Error adding database:', err);
+      const errorMessage = err instanceof Error ? err.message : 'Failed to connect to database';
+      if (typeof err === 'object' && err !== null && 'response' in err) {
+        const axiosErr = err as { response?: { data?: { error?: string } } };
+        error(axiosErr.response?.data?.error || errorMessage);
+      } else {
+        error(errorMessage);
+      }
+    }
+  };
+
+  /**
    * Handle source deletion
    */
   const handleDeleteSource = async (sourceId: string, sourceName: string) => {
@@ -542,6 +573,7 @@ export const SourcesPanel: React.FC<SourcesPanelProps> = ({ projectId, isCollaps
         onAddUrl={handleAddUrl}
         onAddText={handleAddText}
         onAddResearch={handleAddResearch}
+        onAddDatabase={handleAddDatabase}
         onImportComplete={loadSources}
         uploading={uploading}
       />

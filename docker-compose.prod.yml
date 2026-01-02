@@ -4,6 +4,8 @@ services:
       context: .
       dockerfile: backend/Dockerfile
       target: production
+    ports:
+      - "5000:5000"
     volumes:
       - backend_data:/app/data
     env_file:

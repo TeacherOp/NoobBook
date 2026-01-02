@@ -19,15 +19,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* \
     && pip install uv
 
-# Install playwright browsers
-RUN pip install playwright && playwright install --with-deps chromium
-
 WORKDIR /app
 
 # Development stage
 FROM base AS development
 COPY backend/requirements.txt .
 RUN uv pip install --system -r requirements.txt
+# Install playwright browsers for development
+RUN pip install playwright && playwright install --with-deps chromium
 COPY backend/ .
 EXPOSE 5000
 CMD ["python", "run.py"]

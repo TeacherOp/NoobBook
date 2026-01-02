@@ -115,7 +115,7 @@ clean-all: ## Remove everything including images
 # Health Checks
 health: ## Check service health
 	@echo "🏥 Checking service health..."
-	@curl -f http://localhost:5000/health || echo "❌ Backend unhealthy"
+	@curl -f http://localhost:5000/api/v1/health || echo "❌ Backend unhealthy"
 	@wget --spider -q http://localhost:5173 || echo "❌ Frontend unhealthy"
 
 # Quick Start Commands

@@ -1,34 +1,29 @@
 # Frontend Dockerfile - Multi-stage build
 FROM node:22-alpine AS base
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
-
 # Set working directory
 WORKDIR /app
 
 # Development stage
 FROM base AS development
-COPY frontend/package*.json frontend/pnpm-lock.yaml* ./
-RUN pnpm install && \
-    pnpm rebuild esbuild
+COPY frontend/package*.json ./
+RUN npm install
 COPY frontend/src ./src
 COPY frontend/public ./public
 COPY frontend/index.html frontend/vite.config.ts frontend/tailwind.config.js frontend/postcss.config.js frontend/tsconfig*.json ./
 EXPOSE 5173
-CMD ["pnpm", "dev", "--host", "0.0.0.0"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
 
 # Build stage
 FROM base AS builder
 ARG VITE_API_URL=http://localhost:5000/api/v1
 ENV VITE_API_URL=$VITE_API_URL
-COPY frontend/package*.json frontend/pnpm-lock.yaml* ./
-RUN pnpm install && \
-    pnpm rebuild esbuild
+COPY frontend/package*.json ./
+RUN npm install
 COPY frontend/src ./src
 COPY frontend/public ./public
 COPY frontend/index.html frontend/vite.config.ts frontend/tailwind.config.js frontend/postcss.config.js frontend/tsconfig*.json ./
-RUN pnpm build
+RUN npm run build
 
 # Production stage
 FROM nginx:alpine AS production

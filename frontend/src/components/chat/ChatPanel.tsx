@@ -5,7 +5,7 @@
  * and manages chat state and API interactions.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Sparkle, CircleNotch } from '@phosphor-icons/react';
 import { chatsAPI } from '@/lib/api/chats';
 import type { Chat, ChatMetadata, StudioSignal } from '@/lib/api/chats';
@@ -40,6 +40,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ projectId, projectName, so
   // Sources state for header display
   const [sources, setSources] = useState<Source[]>([]);
 
+  // Memoize active sources count to prevent recalculation on every render
+  const activeSources = useMemo(
+    () => sources.filter(s => s.status === 'ready' && s.active).length,
+    [sources]
+  );
 
   // Voice recording hook
   const {
@@ -370,7 +375,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ projectId, projectName, so
       <ChatHeader
         activeChat={activeChat}
         allChats={allChats}
-        activeSources={sources.filter(s => s.status === 'ready' && s.active).length}
+        activeSources={activeSources}
         totalSources={sources.length}
         onSelectChat={handleSelectChat}
         onNewChat={handleNewChat}

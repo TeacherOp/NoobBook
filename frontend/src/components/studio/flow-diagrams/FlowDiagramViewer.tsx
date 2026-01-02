@@ -202,10 +202,24 @@ export const FlowDiagramViewer: React.FC<FlowDiagramViewerProps> = ({
   };
 
   // Download as SVG
+  // Educational Note: Mermaid with htmlLabels:true embeds HTML inside <foreignObject>.
+  // HTML tags like <br>, <hr>, <img> are not self-closing in HTML5 but must be
+  // self-closing in XML/SVG (e.g., <br/>, <hr/>, <img/>). We sanitize before download.
   const handleDownload = () => {
     if (!svgContent) return;
 
-    const blob = new Blob([svgContent], { type: 'image/svg+xml' });
+    // Sanitize HTML void elements to be XML-compatible (self-closing)
+    // This fixes: "Opening and ending tag mismatch: br line 1 and p"
+    // Uses negative lookahead (?![^>]*\/>) to skip already self-closing tags
+    let sanitizedSvg = svgContent
+      .replace(/<br(?![^>]*\/>)([^>]*)>/gi, '<br$1/>')
+      .replace(/<hr(?![^>]*\/>)([^>]*)>/gi, '<hr$1/>')
+      .replace(/<img(?![^>]*\/>)([^>]*)>/gi, '<img$1/>')
+      .replace(/<input(?![^>]*\/>)([^>]*)>/gi, '<input$1/>')
+      .replace(/<meta(?![^>]*\/>)([^>]*)>/gi, '<meta$1/>')
+      .replace(/<link(?![^>]*\/>)([^>]*)>/gi, '<link$1/>');
+
+    const blob = new Blob([sanitizedSvg], { type: 'image/svg+xml' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

@@ -1,0 +1,28 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+    container_name: noobbook-backend
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+    networks:
+      - noobbook_net
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: noobbook-frontend
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - noobbook_net
+
+networks:
+  noobbook_net:
+    driver: bridge

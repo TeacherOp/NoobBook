@@ -197,6 +197,28 @@ npm install
 npm run dev               # http://localhost:5173
 ```
 
+### Run Docker Image (Frontend)
+
+```bash
+cd frontend
+docker build -t noobbook-frontend:1 .
+docker run -it -p 5173:5173 noobbook-frontend:1
+```
+
+### Run Docker Image (Frontend)
+
+```bash
+cd backend
+docker build -t noobbook-backend:1 .
+docker run -it -p 5000:5000 noobbook-backend:1
+```
+
+### Using Docker Compose (Frontend & Backend together) [Easiest]
+
+```bash
+docker compose up --build -d
+```
+
 ### API Keys
 
 Create `backend/.env` or configure in **Dashboard -> Settings**:

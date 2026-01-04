@@ -15,5 +15,5 @@ fi
 
 # Start the development server
 echo "🎯 Starting Vite development server..."
-export VITE_API_URL=http://localhost:5000
+export VITE_API_URL=http://localhost:5000/api/v1
 npm run dev

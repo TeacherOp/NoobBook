@@ -21,12 +21,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Development base with playwright
-FROM base AS dev-base
-RUN pip install playwright && playwright install --with-deps chromium
-
-# Development stage
-FROM dev-base AS development
+FROM base AS development
 COPY backend/requirements.txt .
 RUN uv pip install --system -r requirements.txt
 COPY backend/ .

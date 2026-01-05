@@ -18,9 +18,7 @@ from app.services.integrations.claude import claude_service
 from app.services.source_services import source_index_service
 from app.services.studio_services import studio_index_service
 from app.config import prompt_loader, tool_loader
-from app.config import prompt_loader, tool_loader
 from app.utils import claude_parsing_utils, source_content_utils
-# from app.utils.path_utils import get_chunks_dir, get_processed_dir  <-- Removed unused imports
 
 
 class FlashCardsService:

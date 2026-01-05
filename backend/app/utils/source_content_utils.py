@@ -5,90 +5,112 @@ Used by multiple agents (blog, website, etc.) to get source content
 with smart sampling for large sources.
 """
 
-import os
-from typing import Optional
+from typing import Optional, List
+from app.services.integrations.supabase import storage_service
+from app.services.source_services import source_index_service
 
-from app.utils.path_utils import get_sources_dir
 
-
-def get_source_content(
+def get_sampled_source_content(
     project_id: str,
     source_id: str,
-    max_chars: int = 15000,
-    max_chunks: int = 12
+    max_tokens: int = 10000,
+    max_chunks: int = 20
 ) -> str:
     """
-    Get source content for AI processing.
+    Get source content for AI processing with smart sampling.
 
-    For small sources: returns full content.
+    For small sources (token_count < max_tokens): returns full content.
     For large sources: samples chunks evenly distributed.
 
     Args:
         project_id: Project ID
         source_id: Source ID
-        max_chars: Max characters before sampling (default 15000 ~3500 tokens)
+        max_tokens: Max tokens before sampling (approx)
         max_chunks: Max chunks to sample for large sources
 
     Returns:
         Source content string
     """
     try:
-        from app.services.source_services import source_service
-
-        source = source_service.get_source(project_id, source_id)
+        # Get source metadata
+        source = source_index_service.get_source_from_index(project_id, source_id)
         if not source:
             return "Error: Source not found"
 
-        sources_dir = get_sources_dir(project_id)
-        processed_path = os.path.join(sources_dir, "processed", f"{source_id}.txt")
+        # Check existing token count if available
+        embedding_info = source.get("embedding_info", {}) or {}
+        token_count = embedding_info.get("token_count", 0) or 0
+        
+        # approximate chars from tokens if needed, but we rely on storage logic
+        
+        # 1. Try to get full processed content if small enough
+        if token_count < max_tokens:
+            processed_content = storage_service.download_processed_file(project_id, source_id)
+            if processed_content:
+                return processed_content
+                
+        # 2. If large or processed download failed, try chunks
+        chunk_ids = storage_service.list_source_chunk_ids(project_id, source_id)
+        
+        if not chunk_ids:
+            # Fallback to processed file if no chunks (maybe just on the boundary or token count missing)
+            processed_content = storage_service.download_processed_file(project_id, source_id)
+            if processed_content:
+                 # Truncate if really too long? 
+                 # For now, just return it, trusting caller or max_tokens check wasn't way off
+                 # Or we can do a hard truncate if strictly required.
+                 return processed_content
+            return ""
 
-        if not os.path.exists(processed_path):
-            return f"Source: {source.get('name', 'Unknown')}\n(Content not yet processed)"
-
-        with open(processed_path, "r", encoding="utf-8") as f:
-            full_content = f.read()
-
-        # Small source: return all
-        if len(full_content) < max_chars:
-            return full_content
-
-        # Large source: try to sample chunks
-        chunks_dir = os.path.join(sources_dir, "chunks", source_id)
-        if not os.path.exists(chunks_dir):
-            return full_content[:max_chars] + "\n\n[Content truncated...]"
-
-        chunk_files = sorted([
-            f for f in os.listdir(chunks_dir)
-            if f.endswith(".txt") and f.startswith(source_id)
-        ])
-
-        if not chunk_files:
-            return full_content[:max_chars] + "\n\n[Content truncated...]"
-
-        # Sample chunks evenly distributed
-        if len(chunk_files) <= max_chunks:
-            selected_chunks = chunk_files
+        # Smart Sampling
+        total_chunks = len(chunk_ids)
+        
+        if total_chunks <= max_chunks:
+            selected_ids = chunk_ids
         else:
-            step = len(chunk_files) / max_chunks
-            selected_chunks = [chunk_files[int(i * step)] for i in range(max_chunks)]
-
-        sampled_content = []
-        for chunk_file in selected_chunks:
-            chunk_path = os.path.join(chunks_dir, chunk_file)
-            with open(chunk_path, "r", encoding="utf-8") as f:
-                sampled_content.append(f.read())
-
-        return "\n\n".join(sampled_content)
+            # Sample evenly
+            step = max(1, total_chunks // max_chunks)
+            selected_ids = []
+            for i in range(0, total_chunks, step):
+                if len(selected_ids) >= max_chunks:
+                    break
+                selected_ids.append(chunk_ids[i])
+                
+        # Download selected chunks
+        content_parts = []
+        for cid in selected_ids:
+            chunk_text = storage_service.download_chunk(project_id, source_id, cid)
+            if chunk_text:
+                content_parts.append(chunk_text.strip())
+                
+        return "\n\n---\n\n".join(content_parts)
 
     except Exception as e:
+        print(f"Error loading source content: {e}")
         return f"Error loading source content: {str(e)}"
+
+# Alias for backward compatibility, mapping approx chars to tokens
+def get_source_content(
+    project_id: str,
+    source_id: str,
+    max_chars: int = 15000,
+    max_chunks: int = 12
+) -> str:
+    """Wrapper for get_sampled_source_content to maintain backward compatibility."""
+    # Approx 4 chars per token -> 15000 chars ~ 3750 tokens
+    max_tokens = max_chars // 4
+    return get_sampled_source_content(
+        project_id, 
+        source_id, 
+        max_tokens=max_tokens, 
+        max_chunks=max_chunks
+    )
 
 
 def get_source_name(project_id: str, source_id: str) -> Optional[str]:
     """Get source name by ID."""
     try:
-        from app.services.source_services import source_service
-        source = source_service.get_source(project_id, source_id)
+        source = source_index_service.get_source_from_index(project_id, source_id)
         return source.get("name") if source else None
     except Exception:
         return None

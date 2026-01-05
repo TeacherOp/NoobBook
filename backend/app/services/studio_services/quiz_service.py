@@ -19,7 +19,8 @@ from app.services.source_services import source_index_service
 from app.services.studio_services import studio_index_service
 from app.services.integrations.supabase import storage_service
 from app.config import prompt_loader, tool_loader
-from app.utils import claude_parsing_utils
+from app.config import prompt_loader, tool_loader
+from app.utils import claude_parsing_utils, source_content_utils
 
 
 class QuizService:
@@ -47,54 +48,7 @@ class QuizService:
             self._tool = tool_loader.load_tool("studio_tools", "quiz_tool")
         return self._tool
 
-    def _get_source_content(
-        self,
-        project_id: str,
-        source_id: str,
-        max_tokens: int = 8000
-    ) -> str:
-        """
-        Get source content for quiz generation.
 
-        Educational Note: For large sources, we sample chunks evenly
-        to stay within token limits while covering the full content.
-        Content is downloaded from Supabase Storage.
-        """
-        # Get source metadata
-        source = source_index_service.get_source_from_index(project_id, source_id)
-        if not source:
-            return ""
-
-        # Token count is stored in embedding_info
-        embedding_info = source.get("embedding_info", {}) or {}
-        token_count = embedding_info.get("token_count", 0) or 0
-
-        # For small sources, read the processed file from Supabase Storage
-        if token_count < max_tokens:
-            processed_content = storage_service.download_processed_file(
-                project_id, source_id
-            )
-            if processed_content:
-                return processed_content
-
-        # For large sources, get chunks from Supabase Storage
-        chunks = storage_service.list_source_chunks(project_id, source_id)
-        if not chunks:
-            return ""
-
-        # Sample evenly across chunks
-        total_chunks = len(chunks)
-        sample_count = min(20, total_chunks)  # Max 20 chunks
-        step = max(1, total_chunks // sample_count)
-
-        content_parts = []
-        for i in range(0, total_chunks, step):
-            if len(content_parts) >= sample_count:
-                break
-            chunk_text = chunks[i].get("text", "")
-            content_parts.append(chunk_text.strip())
-
-        return '\n\n---\n\n'.join(content_parts)
 
     def generate_quiz(
         self,
@@ -141,7 +95,9 @@ class QuizService:
                 progress="Analyzing content..."
             )
 
-            content = self._get_source_content(project_id, source_id)
+            content = source_content_utils.get_sampled_source_content(
+                project_id, source_id, max_tokens=8000
+            )
             if not content:
                 raise ValueError("No content found for source")
 

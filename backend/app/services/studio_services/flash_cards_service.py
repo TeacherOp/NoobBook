@@ -18,8 +18,9 @@ from app.services.integrations.claude import claude_service
 from app.services.source_services import source_index_service
 from app.services.studio_services import studio_index_service
 from app.config import prompt_loader, tool_loader
-from app.utils import claude_parsing_utils
-from app.utils.path_utils import get_chunks_dir, get_processed_dir
+from app.config import prompt_loader, tool_loader
+from app.utils import claude_parsing_utils, source_content_utils
+# from app.utils.path_utils import get_chunks_dir, get_processed_dir  <-- Removed unused imports
 
 
 class FlashCardsService:
@@ -47,59 +48,7 @@ class FlashCardsService:
             self._tool = tool_loader.load_tool("studio_tools", "flash_cards_tool")
         return self._tool
 
-    def _get_source_content(
-        self,
-        project_id: str,
-        source_id: str,
-        max_tokens: int = 8000
-    ) -> str:
-        """
-        Get source content for flash card generation.
 
-        Educational Note: For large sources, we sample chunks evenly
-        to stay within token limits while covering the full content.
-        """
-        # Get source metadata
-        source = source_index_service.get_source_from_index(project_id, source_id)
-        if not source:
-            return ""
-
-        # Token count is stored in embedding_info
-        embedding_info = source.get("embedding_info", {}) or {}
-        token_count = embedding_info.get("token_count", 0) or 0
-
-        # For small sources, read the processed file directly
-        if token_count < max_tokens:
-            processed_dir = get_processed_dir(project_id)
-            processed_file = processed_dir / f"{source_id}.txt"
-            if processed_file.exists():
-                return processed_file.read_text(encoding='utf-8')
-
-        # For large sources, sample chunks evenly
-        chunks_dir = get_chunks_dir(project_id, source_id)
-        if not chunks_dir.exists():
-            return ""
-
-        chunk_files = sorted(chunks_dir.glob("*.txt"))
-        if not chunk_files:
-            return ""
-
-        # Sample evenly across chunks
-        total_chunks = len(chunk_files)
-        sample_count = min(20, total_chunks)  # Max 20 chunks
-        step = max(1, total_chunks // sample_count)
-
-        content_parts = []
-        for i in range(0, total_chunks, step):
-            if len(content_parts) >= sample_count:
-                break
-            chunk_content = chunk_files[i].read_text(encoding='utf-8')
-            # Skip the metadata header (lines starting with #)
-            lines = chunk_content.split('\n')
-            content_lines = [l for l in lines if not l.startswith('#')]
-            content_parts.append('\n'.join(content_lines).strip())
-
-        return '\n\n---\n\n'.join(content_parts)
 
     def generate_flash_cards(
         self,
@@ -146,7 +95,9 @@ class FlashCardsService:
                 progress="Analyzing content..."
             )
 
-            content = self._get_source_content(project_id, source_id)
+            content = source_content_utils.get_sampled_source_content(
+                project_id, source_id, max_tokens=8000
+            )
             if not content:
                 raise ValueError("No content found for source")
 

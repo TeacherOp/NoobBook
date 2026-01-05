@@ -343,6 +343,44 @@ def list_source_chunks(project_id: str, source_id: str) -> List[Dict[str, Any]]:
         return []
 
 
+def list_source_chunk_ids(project_id: str, source_id: str) -> List[str]:
+    """
+    List all chunk IDs for a source without downloading content.
+
+    Args:
+        project_id: The project UUID
+        source_id: The source UUID
+
+    Returns:
+        List of chunk IDs (e.g., "source_id_page_1_chunk_1")
+    """
+    client = _get_client()
+    prefix = f"{project_id}/{source_id}"
+
+    try:
+        # List all files in the source's chunk folder
+        files = client.storage.from_(BUCKET_CHUNKS).list(prefix)
+        if not files:
+            return []
+
+        chunk_ids = []
+        for file_info in files:
+            filename = file_info.get("name", "")
+            if not filename.endswith(".txt"):
+                continue
+
+            # Extract chunk_id from filename (remove .txt)
+            chunk_ids.append(filename[:-4])
+
+        # Sort for consistent ordering
+        chunk_ids.sort()
+        return chunk_ids
+
+    except Exception as e:
+        print(f"  Error listing chunk IDs: {e}")
+        return []
+
+
 def delete_source_chunks(project_id: str, source_id: str) -> bool:
     """
     Delete all chunks for a source.

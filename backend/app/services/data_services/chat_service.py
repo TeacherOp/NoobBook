@@ -3,6 +3,7 @@ Chat Service - CRUD operations for chat entities.
 
 Educational Note: This service manages chat entity lifecycle within projects.
 It handles creating, listing, getting, updating, and deleting chats.
+Data access is delegated to the repository layer.
 
 Separation of Concerns:
 - chat_service.py: Chat CRUD (this file)
@@ -10,13 +11,9 @@ Separation of Concerns:
 - message_service.py: Message persistence
 - prompt_loader.py: Prompt management
 """
-import json
-import uuid
-from datetime import datetime
-from pathlib import Path
 from typing import Optional, Dict, List, Any
 
-from config import Config
+from app.repositories import get_chat_repository
 
 
 class ChatService:
@@ -25,69 +22,19 @@ class ChatService:
 
     Educational Note: A chat is a conversation container within a project.
     It has metadata (title, timestamps) and holds messages.
+    Data access is handled by the repository layer.
     """
 
     def __init__(self):
         """Initialize the chat service."""
-        self.projects_dir = Config.PROJECTS_DIR
+        self._repo = None
 
-    def _get_chats_dir(self, project_id: str) -> Path:
-        """Get the chats directory for a project."""
-        chats_dir = self.projects_dir / project_id / "chats"
-        chats_dir.mkdir(exist_ok=True, parents=True)
-        return chats_dir
-
-    def _get_index_file(self, project_id: str) -> Path:
-        """Get the chats index file path."""
-        return self._get_chats_dir(project_id) / "chats_index.json"
-
-    def _get_chat_file(self, project_id: str, chat_id: str) -> Path:
-        """Get a specific chat's file path."""
-        return self._get_chats_dir(project_id) / f"{chat_id}.json"
-
-    def _load_index(self, project_id: str) -> Dict[str, Any]:
-        """
-        Load the chats index for a project.
-
-        Educational Note: The index provides quick access to chat metadata
-        without loading full chat files with all messages.
-        """
-        index_file = self._get_index_file(project_id)
-
-        if not index_file.exists():
-            # Initialize empty index
-            initial_index = {
-                "project_id": project_id,
-                "chats": [],
-                "last_updated": datetime.now().isoformat()
-            }
-            self._save_index(project_id, initial_index)
-            return initial_index
-
-        try:
-            with open(index_file, 'r') as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            # Reinitialize if corrupted
-            initial_index = {
-                "project_id": project_id,
-                "chats": [],
-                "last_updated": datetime.now().isoformat()
-            }
-            self._save_index(project_id, initial_index)
-            return initial_index
-
-    def _save_index(self, project_id: str, index_data: Dict[str, Any]) -> bool:
-        """Save the chats index."""
-        index_data["last_updated"] = datetime.now().isoformat()
-        index_file = self._get_index_file(project_id)
-
-        try:
-            with open(index_file, 'w') as f:
-                json.dump(index_data, f, indent=2)
-            return True
-        except IOError:
-            return False
+    @property
+    def repo(self):
+        """Lazy-load the repository."""
+        if self._repo is None:
+            self._repo = get_chat_repository()
+        return self._repo
 
     def list_chats(self, project_id: str) -> List[Dict[str, Any]]:
         """
@@ -102,15 +49,14 @@ class ChatService:
         Returns:
             List of chat metadata, sorted by most recent first
         """
-        index = self._load_index(project_id)
+        chats = self.repo.list_by_project(project_id)
 
         # Sort by updated_at, most recent first
-        chats = sorted(
-            index["chats"],
-            key=lambda c: c.get("updated_at", c["created_at"]),
+        return sorted(
+            chats,
+            key=lambda c: c.get("updated_at", c.get("created_at", "")),
             reverse=True
         )
-        return chats
 
     def create_chat(self, project_id: str, title: str = "New Chat") -> Dict[str, Any]:
         """
@@ -126,46 +72,9 @@ class ChatService:
         Returns:
             Created chat metadata
         """
-        chat_id = str(uuid.uuid4())
-        timestamp = datetime.now().isoformat()
-
-        # Chat metadata for index
-        chat_metadata = {
-            "id": chat_id,
-            "title": title,
-            "created_at": timestamp,
-            "updated_at": timestamp,
-            "message_count": 0
-        }
-
-        # Full chat data for file
-        chat_data = {
-            "id": chat_id,
-            "project_id": project_id,
-            "title": title,
-            "created_at": timestamp,
-            "updated_at": timestamp,
-            "messages": [],
-            "metadata": {
-                "source_references": [],
-                "sub_agents": []
-            },
-            "message_count": 0
-        }
-
-        # Save chat file
-        chat_file = self._get_chat_file(project_id, chat_id)
-        with open(chat_file, 'w') as f:
-            json.dump(chat_data, f, indent=2)
-
-        # Update index
-        index = self._load_index(project_id)
-        index["chats"].append(chat_metadata)
-        self._save_index(project_id, index)
-
-        print(f"Created chat: {title} (ID: {chat_id})")
-
-        return chat_metadata
+        chat = self.repo.create(project_id=project_id, title=title)
+        print(f"Created chat: {title} (ID: {chat['id']})")
+        return chat
 
     def get_chat(self, project_id: str, chat_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -183,30 +92,24 @@ class ChatService:
         Returns:
             Full chat data or None if not found
         """
-        chat_file = self._get_chat_file(project_id, chat_id)
+        chat_data = self.repo.get_by_id(project_id, chat_id)
 
-        if not chat_file.exists():
+        if not chat_data:
             return None
 
-        try:
-            with open(chat_file, 'r') as f:
-                chat_data = json.load(f)
-
-            # Filter out tool_use and tool_result messages for display
-            # These have content as arrays instead of strings
+        # Filter out tool_use and tool_result messages for display
+        # These have content as arrays instead of strings
+        if "messages" in chat_data:
             chat_data["messages"] = [
                 msg for msg in chat_data.get("messages", [])
                 if isinstance(msg.get("content"), str)
             ]
 
-            # Ensure studio_signals exists (even if empty)
-            if "studio_signals" not in chat_data:
-                chat_data["studio_signals"] = []
+        # Ensure studio_signals exists (even if empty)
+        if "studio_signals" not in chat_data:
+            chat_data["studio_signals"] = []
 
-            return chat_data
-        except json.JSONDecodeError:
-            print(f"Warning: Corrupted chat file: {chat_id}")
-            return None
+        return chat_data
 
     def get_chat_metadata(self, project_id: str, chat_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -222,12 +125,7 @@ class ChatService:
         Returns:
             Chat metadata or None if not found
         """
-        index = self._load_index(project_id)
-
-        for chat in index["chats"]:
-            if chat["id"] == chat_id:
-                return chat
-        return None
+        return self.repo.get_metadata(project_id, chat_id)
 
     def update_chat(
         self,
@@ -249,39 +147,14 @@ class ChatService:
         Returns:
             Updated chat metadata or None if not found
         """
-        chat_file = self._get_chat_file(project_id, chat_id)
+        # Filter to allowed updates only
+        allowed_updates = {k: v for k, v in updates.items() if k in ["title"]}
 
-        if not chat_file.exists():
-            return None
+        if not allowed_updates:
+            return self.get_chat_metadata(project_id, chat_id)
 
-        try:
-            with open(chat_file, 'r') as f:
-                chat_data = json.load(f)
-
-            # Apply updates
-            for key, value in updates.items():
-                if key in ["title"]:  # Allowed updates
-                    chat_data[key] = value
-
-            chat_data["updated_at"] = datetime.now().isoformat()
-
-            # Save chat file
-            with open(chat_file, 'w') as f:
-                json.dump(chat_data, f, indent=2)
-
-            # Update index
-            self._update_index_entry(project_id, chat_id, chat_data)
-
-            return {
-                "id": chat_data["id"],
-                "title": chat_data["title"],
-                "created_at": chat_data["created_at"],
-                "updated_at": chat_data["updated_at"],
-                "message_count": len(chat_data["messages"])
-            }
-
-        except (json.JSONDecodeError, IOError):
-            return None
+        updated = self.repo.update(project_id, chat_id, allowed_updates)
+        return updated
 
     def delete_chat(self, project_id: str, chat_id: str) -> bool:
         """
@@ -294,43 +167,10 @@ class ChatService:
         Returns:
             True if deleted, False if not found
         """
-        chat_file = self._get_chat_file(project_id, chat_id)
-
-        if not chat_file.exists():
-            return False
-
-        # Delete chat file
-        chat_file.unlink()
-
-        # Remove from index
-        index = self._load_index(project_id)
-        index["chats"] = [c for c in index["chats"] if c["id"] != chat_id]
-        self._save_index(project_id, index)
-
-        print(f"Deleted chat: {chat_id}")
-        return True
-
-    def _update_index_entry(
-        self,
-        project_id: str,
-        chat_id: str,
-        chat_data: Dict[str, Any]
-    ):
-        """Update a chat's entry in the index."""
-        index = self._load_index(project_id)
-
-        for i, chat in enumerate(index["chats"]):
-            if chat["id"] == chat_id:
-                index["chats"][i] = {
-                    "id": chat_data["id"],
-                    "title": chat_data["title"],
-                    "created_at": chat_data["created_at"],
-                    "updated_at": chat_data["updated_at"],
-                    "message_count": len(chat_data["messages"])
-                }
-                break
-
-        self._save_index(project_id, index)
+        deleted = self.repo.delete(project_id, chat_id)
+        if deleted:
+            print(f"Deleted chat: {chat_id}")
+        return deleted
 
     def sync_chat_to_index(self, project_id: str, chat_id: str) -> bool:
         """
@@ -346,12 +186,10 @@ class ChatService:
         Returns:
             True if successful
         """
-        chat_data = self.get_chat(project_id, chat_id)
-        if not chat_data:
-            return False
-
-        self._update_index_entry(project_id, chat_id, chat_data)
-        return True
+        # The repository handles this internally
+        # This method exists for backward compatibility
+        chat_data = self.repo.get_by_id(project_id, chat_id)
+        return chat_data is not None
 
 
 # Singleton instance for easy import

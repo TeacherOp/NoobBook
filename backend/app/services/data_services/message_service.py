@@ -3,9 +3,10 @@ Message Service - Handles message persistence and retrieval for chat and agent c
 
 Educational Note: This is a pure CRUD service for messages (chat and agent).
 It handles storing and retrieving messages, building message arrays for API calls.
+Data access is delegated to the repository layer.
 
 Key Responsibilities:
-- Store messages to chat JSON files
+- Store messages to storage (via repository)
 - Retrieve message history
 - Build message arrays for Claude API calls
 - Support different message types (user, assistant, tool_result)
@@ -14,13 +15,11 @@ Key Responsibilities:
 For parsing Claude API responses (tool_use blocks, content extraction),
 see utils/claude_parsing_utils.py
 """
-import json
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Optional, Dict, List, Any
 
-from config import Config
+from app.repositories import get_message_repository
 from app.utils import claude_parsing_utils
 from app.utils.path_utils import get_web_agent_dir, get_agents_dir
 
@@ -29,75 +28,20 @@ class MessageService:
     """
     Service class for message persistence and context management.
 
-    Educational Note: Messages are stored in individual chat JSON files.
+    Educational Note: Messages are stored via the repository layer.
     This service handles the format conversion between storage and API.
     """
 
     def __init__(self):
         """Initialize the message service."""
-        self.projects_dir = Config.PROJECTS_DIR
+        self._repo = None
 
-    def _get_chat_file(self, project_id: str, chat_id: str) -> Path:
-        """Get the path to a chat's JSON file."""
-        return self.projects_dir / project_id / "chats" / f"{chat_id}.json"
-
-    def _load_chat_data(self, project_id: str, chat_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Load chat data from file.
-
-        Args:
-            project_id: The project UUID
-            chat_id: The chat UUID
-
-        Returns:
-            Chat data dict or None if not found
-        """
-        chat_file = self._get_chat_file(project_id, chat_id)
-
-        if not chat_file.exists():
-            print(f"  DEBUG: Chat file does not exist: {chat_file}")
-            return None
-
-        try:
-            with open(chat_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data
-        except json.JSONDecodeError as e:
-            print(f"  DEBUG: JSON decode error loading chat {chat_id}: {e}")
-            # Try to read raw content for debugging
-            try:
-                with open(chat_file, 'r', encoding='utf-8') as f:
-                    raw_content = f.read()
-                print(f"  DEBUG: File size: {len(raw_content)} chars")
-                print(f"  DEBUG: First 200 chars: {raw_content[:200]}")
-            except:
-                pass
-            return None
-
-    def _save_chat_data(self, project_id: str, chat_id: str, data: Dict[str, Any]) -> bool:
-        """
-        Save chat data to file.
-
-        Args:
-            project_id: The project UUID
-            chat_id: The chat UUID
-            data: Chat data to save
-
-        Returns:
-            True if successful
-        """
-        chat_file = self._get_chat_file(project_id, chat_id)
-
-        try:
-            with open(chat_file, 'w') as f:
-                json.dump(data, f, indent=2)
-            return True
-        except IOError as e:
-            print(f"  DEBUG: Failed to save chat {chat_id}: {e}")
-            return False
-        except Exception as e:
-            print(f"  DEBUG: Unexpected error saving chat {chat_id}: {e}")
-            return False
+    @property
+    def repo(self):
+        """Lazy-load the repository."""
+        if self._repo is None:
+            self._repo = get_message_repository()
+        return self._repo
 
     def get_messages(self, project_id: str, chat_id: str) -> List[Dict[str, Any]]:
         """
@@ -110,12 +54,7 @@ class MessageService:
         Returns:
             List of message dicts
         """
-        chat_data = self._load_chat_data(project_id, chat_id)
-        if not chat_data:
-            print(f"  DEBUG: get_messages - chat_data is None for chat {chat_id}")
-            return []
-        messages = chat_data.get("messages", [])
-        return messages
+        return self.repo.get_by_chat(project_id, chat_id)
 
     def add_message(
         self,
@@ -142,31 +81,13 @@ class MessageService:
         Returns:
             The created message dict, or None if chat not found
         """
-        chat_data = self._load_chat_data(project_id, chat_id)
-        if not chat_data:
-            return None
-
-        # Create message
-        message = {
-            "id": str(uuid.uuid4()),
-            "role": role,
-            "content": content,
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        # Add optional metadata
-        if metadata:
-            message.update(metadata)
-
-        # Append to messages
-        chat_data["messages"].append(message)
-        chat_data["updated_at"] = datetime.now().isoformat()
-        chat_data["message_count"] = len(chat_data["messages"])
-
-        # Save
-        self._save_chat_data(project_id, chat_id, chat_data)
-
-        return message
+        return self.repo.add_message(
+            project_id=project_id,
+            chat_id=chat_id,
+            role=role,
+            content=content,
+            metadata=metadata
+        )
 
     def add_user_message(
         self,
@@ -340,24 +261,13 @@ class MessageService:
         Returns:
             True if successful
         """
-        chat_data = self._load_chat_data(project_id, chat_id)
-        if not chat_data:
-            return False
-
-        # Update fields
-        for key, value in updates.items():
-            if key != "messages":  # Don't allow message updates via this method
-                chat_data[key] = value
-
-        chat_data["updated_at"] = datetime.now().isoformat()
-
-        return self._save_chat_data(project_id, chat_id, chat_data)
+        return self.repo.update_chat_metadata(project_id, chat_id, updates)
 
     # =========================================================================
     # Agent Execution Logs - For storing agent debug/execution data
     # =========================================================================
 
-    def _get_agent_dir(self, project_id: str, agent_name: str) -> Path:
+    def _get_agent_dir(self, project_id: str, agent_name: str):
         """
         Get the directory for a specific agent's execution logs.
 
@@ -418,6 +328,8 @@ class MessageService:
             return None
 
         try:
+            import json
+
             # Get agent directory using path_utils
             agent_dir = self._get_agent_dir(project_id, agent_name)
 
@@ -466,6 +378,8 @@ class MessageService:
             Execution log dict or None if not found
         """
         try:
+            import json
+
             agent_dir = self._get_agent_dir(project_id, agent_name)
             log_file = agent_dir / f"{execution_id}.json"
 
@@ -475,7 +389,7 @@ class MessageService:
             with open(log_file, "r", encoding="utf-8") as f:
                 return json.load(f)
 
-        except (json.JSONDecodeError, IOError) as e:
+        except Exception as e:
             print(f"  Error reading {agent_name} execution log: {e}")
             return None
 
@@ -500,6 +414,8 @@ class MessageService:
             List of execution summaries (id, task, completed_at, success)
         """
         try:
+            import json
+
             agent_dir = self._get_agent_dir(project_id, agent_name)
 
             if not agent_dir.exists():
@@ -516,7 +432,7 @@ class MessageService:
                             "completed_at": log.get("completed_at"),
                             "success": log.get("result", {}).get("success", False)
                         })
-                except (json.JSONDecodeError, IOError):
+                except Exception:
                     continue
 
             # Sort by completion time (newest first)

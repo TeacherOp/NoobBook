@@ -1,35 +1,41 @@
 """
 Source Index Service - CRUD operations for the sources index.
 
-Educational Note: This service manages the sources_index.json file which stores
-metadata for all sources in a project. Separating index operations from the
-main source_service keeps concerns focused and files smaller.
+Educational Note: This service manages source metadata, which can be stored
+in JSON files or Supabase depending on configuration. It delegates data access
+to the repository layer.
 
-The index structure:
+The source structure:
 {
-    "sources": [
-        {
-            "id": "uuid",
-            "name": "...",
-            "status": "uploaded|processing|embedding|ready|error",
-            ... other metadata
-        }
-    ],
-    "last_updated": "ISO timestamp"
+    "id": "uuid",
+    "name": "...",
+    "status": "uploaded|processing|embedding|ready|error",
+    ... other metadata
 }
 """
-import json
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
-from app.utils.path_utils import get_sources_index_path
+from app.repositories import get_source_repository
+
+
+# Cache the repository instance
+_repo = None
+
+
+def _get_repo():
+    """Get or create the source repository singleton."""
+    global _repo
+    if _repo is None:
+        _repo = get_source_repository()
+    return _repo
 
 
 def load_index(project_id: str) -> Dict[str, Any]:
     """
     Load the sources index for a project.
 
-    Educational Note: Returns empty structure if index doesn't exist.
+    Educational Note: Returns empty structure if no sources exist.
     This is safe to call for new projects.
 
     Args:
@@ -38,40 +44,27 @@ def load_index(project_id: str) -> Dict[str, Any]:
     Returns:
         Dict with "sources" list and "last_updated" timestamp
     """
-    index_path = get_sources_index_path(project_id)
-
-    if not index_path.exists():
-        return {
-            "sources": [],
-            "last_updated": datetime.now().isoformat()
-        }
-
-    try:
-        with open(index_path, 'r') as f:
-            return json.load(f)
-    except (json.JSONDecodeError, FileNotFoundError):
-        return {
-            "sources": [],
-            "last_updated": datetime.now().isoformat()
-        }
+    sources = _get_repo().list_by_project(project_id)
+    return {
+        "sources": sources,
+        "last_updated": datetime.now().isoformat()
+    }
 
 
 def save_index(project_id: str, index_data: Dict[str, Any]) -> None:
     """
     Save the sources index for a project.
 
-    Educational Note: Updates last_updated timestamp automatically.
-    The get_sources_index_path function ensures the parent directory exists.
+    Educational Note: This is maintained for backward compatibility.
+    The repository handles actual persistence.
 
     Args:
         project_id: The project UUID
-        index_data: The index data to save
+        index_data: The index data to save (contains "sources" list)
     """
-    index_path = get_sources_index_path(project_id)
-
-    index_data["last_updated"] = datetime.now().isoformat()
-    with open(index_path, 'w') as f:
-        json.dump(index_data, f, indent=2)
+    # The repository handles individual source updates
+    # This function exists for backward compatibility
+    pass
 
 
 def add_source_to_index(project_id: str, source_metadata: Dict[str, Any]) -> None:
@@ -82,9 +75,7 @@ def add_source_to_index(project_id: str, source_metadata: Dict[str, Any]) -> Non
         project_id: The project UUID
         source_metadata: Complete source metadata dict
     """
-    index = load_index(project_id)
-    index["sources"].append(source_metadata)
-    save_index(project_id, index)
+    _get_repo().create(project_id, source_metadata)
 
 
 def remove_source_from_index(project_id: str, source_id: str) -> bool:
@@ -98,16 +89,7 @@ def remove_source_from_index(project_id: str, source_id: str) -> bool:
     Returns:
         True if source was found and removed, False otherwise
     """
-    index = load_index(project_id)
-    original_count = len(index["sources"])
-
-    index["sources"] = [s for s in index["sources"] if s["id"] != source_id]
-
-    if len(index["sources"]) < original_count:
-        save_index(project_id, index)
-        return True
-
-    return False
+    return _get_repo().delete(project_id, source_id)
 
 
 def get_source_from_index(project_id: str, source_id: str) -> Optional[Dict[str, Any]]:
@@ -121,13 +103,7 @@ def get_source_from_index(project_id: str, source_id: str) -> Optional[Dict[str,
     Returns:
         Source metadata dict or None if not found
     """
-    index = load_index(project_id)
-
-    for source in index["sources"]:
-        if source["id"] == source_id:
-            return source
-
-    return None
+    return _get_repo().get_by_id(project_id, source_id)
 
 
 def update_source_in_index(
@@ -149,22 +125,7 @@ def update_source_in_index(
     Returns:
         Updated source metadata or None if not found
     """
-    index = load_index(project_id)
-
-    for i, source in enumerate(index["sources"]):
-        if source["id"] == source_id:
-            # Apply updates
-            for key, value in updates.items():
-                if value is not None:
-                    source[key] = value
-
-            source["updated_at"] = datetime.now().isoformat()
-            index["sources"][i] = source
-            save_index(project_id, index)
-
-            return source
-
-    return None
+    return _get_repo().update(project_id, source_id, updates)
 
 
 def list_sources_from_index(project_id: str) -> List[Dict[str, Any]]:
@@ -177,10 +138,9 @@ def list_sources_from_index(project_id: str) -> List[Dict[str, Any]]:
     Returns:
         List of source metadata dicts
     """
-    index = load_index(project_id)
-
+    sources = _get_repo().list_by_project(project_id)
     return sorted(
-        index["sources"],
+        sources,
         key=lambda s: s.get("created_at", ""),
         reverse=True
     )

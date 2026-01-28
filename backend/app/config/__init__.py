@@ -7,6 +7,7 @@ configuration data for other services. They handle:
 - Prompt configurations (system prompts, model settings)
 - API tier settings (rate limits, worker counts)
 - Context building (sources, memory for chat prompts)
+- Supabase client configuration (database and storage)
 
 These are NOT AI-powered services - they load configuration from files
 and environment variables.
@@ -16,6 +17,7 @@ Loaders:
 - prompt_loader: Load/save prompt configurations
 - tier_loader: API tier rate limit settings
 - context_loader: Build source and memory context for chat prompts
+- supabase: Supabase client configuration and connection management
 """
 from app.config.tool_loader import tool_loader
 from app.config.prompt_loader import prompt_loader
@@ -33,6 +35,12 @@ from app.config.tier_loader import (
     OPENAI_TIERS,
     PINECONE_TIERS,
 )
+from app.config.supabase import (
+    get_supabase_config,
+    get_supabase_client,
+    get_supabase_storage,
+    check_supabase_connection,
+)
 
 __all__ = [
     "tool_loader",
@@ -49,4 +57,9 @@ __all__ = [
     "ANTHROPIC_TIERS",
     "OPENAI_TIERS",
     "PINECONE_TIERS",
+    # Supabase
+    "get_supabase_config",
+    "get_supabase_client",
+    "get_supabase_storage",
+    "check_supabase_connection",
 ]

@@ -8,16 +8,18 @@ Educational Note: This processor orchestrates an AI agent that:
 4. Synthesizes findings into a comprehensive document
 5. Saves the result for embedding and chat context
 
-The output follows the standard processed format with page markers.
+Storage: Processed content is stored in Supabase Storage. Chunks are also
+stored in Supabase Storage for RAG retrieval.
 """
 import json
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
 
 from app.utils.text import build_processed_output
-from app.utils.path_utils import get_processed_dir, get_chunks_dir
 from app.utils.embedding_utils import needs_embedding, count_tokens
+from app.services.integrations.supabase import storage_service
 from app.services.ai_services.embedding_service import embedding_service
 from app.services.ai_services.summary_service import summary_service
 
@@ -48,9 +50,6 @@ def process_research(
     Returns:
         Dict with success status
     """
-    processed_dir = get_processed_dir(project_id)
-    processed_path = processed_dir / f"{source_id}.txt"
-
     # Load research request
     with open(raw_file_path, "r", encoding="utf-8") as f:
         research_request = json.load(f)
@@ -65,9 +64,13 @@ def process_research(
     print(f"Description: {description[:100]}...")
     print(f"Reference links: {len(links)}")
 
+    # Use temp file for agent output
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as temp_file:
+        temp_path = Path(temp_file.name)
+
     try:
         # Run the deep research agent
-        # Agent writes directly to processed file via executor
+        # Agent writes directly to temp file via executor
         from app.services.ai_agents.deep_research_agent import deep_research_agent
 
         research_result = deep_research_agent.research(
@@ -76,17 +79,17 @@ def process_research(
             topic=topic,
             description=description,
             links=links,
-            output_path=str(processed_path)
+            output_path=str(temp_path)
         )
 
         if not research_result.get("success"):
             raise Exception(research_result.get("error", "Research failed"))
 
         # Read the content that the agent wrote to file
-        if not processed_path.exists():
+        if not temp_path.exists():
             raise Exception("Research agent did not create output file")
 
-        with open(processed_path, "r", encoding="utf-8") as f:
+        with open(temp_path, "r", encoding="utf-8") as f:
             research_content = f.read()
 
         if not research_content:
@@ -98,6 +101,9 @@ def process_research(
 
     except Exception as e:
         print(f"Research agent error: {e}")
+        # Clean up temp file
+        if temp_path.exists():
+            temp_path.unlink()
         source_service.update_source(
             project_id,
             source_id,
@@ -108,6 +114,10 @@ def process_research(
             }
         )
         return {"success": False, "error": str(e)}
+    finally:
+        # Clean up temp file
+        if temp_path.exists():
+            temp_path.unlink()
 
     # Calculate token count for metadata
     token_count = count_tokens(research_content)
@@ -129,9 +139,21 @@ def process_research(
         metadata=metadata
     )
 
-    # Save processed content
-    with open(processed_path, "w", encoding="utf-8") as f:
-        f.write(processed_content)
+    # Upload processed content to Supabase Storage
+    storage_path = storage_service.upload_processed_file(
+        project_id=project_id,
+        source_id=source_id,
+        content=processed_content
+    )
+
+    if not storage_path:
+        source_service.update_source(
+            project_id,
+            source_id,
+            status="error",
+            processing_info={"error": "Failed to upload processed content to storage"}
+        )
+        return {"success": False, "error": "Failed to upload processed content to storage"}
 
     processing_info = {
         "processor": "research_processor",
@@ -184,6 +206,7 @@ def _process_embeddings(
 
     Educational Note: Research documents are typically comprehensive and
     benefit greatly from semantic search via embeddings.
+    Chunks are uploaded to Supabase Storage.
     """
     try:
         # Get embedding info
@@ -194,13 +217,12 @@ def _process_embeddings(
         print(f"Starting embedding for research: {source_name} ({reason})")
 
         # Process embeddings using the embedding service
-        chunks_dir = get_chunks_dir(project_id)
+        # Chunks are automatically uploaded to Supabase Storage
         return embedding_service.process_embeddings(
             project_id=project_id,
             source_id=source_id,
             source_name=source_name,
-            processed_text=processed_text,
-            chunks_dir=chunks_dir
+            processed_text=processed_text
         )
 
     except Exception as e:

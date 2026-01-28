@@ -16,6 +16,7 @@ import { Button } from '../../ui/button';
 import { ScrollArea } from '../../ui/scroll-area';
 import { ChartBar, DownloadSimple, SpinnerGap, ChartLine } from '@phosphor-icons/react';
 import { businessReportsAPI, type BusinessReportJob } from '@/lib/api/studio';
+import { API_HOST } from '@/lib/api/client';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -150,7 +151,7 @@ export const BusinessReportViewerModal: React.FC<BusinessReportViewerModalProps>
                     img: ({ src, alt }) => {
                       // Handle chart URLs - they may be relative API paths
                       const imageSrc = src?.startsWith('/api/')
-                        ? `http://localhost:5000${src}`
+                        ? `${API_HOST}${src}`
                         : src;
                       return (
                         <figure className="my-4">

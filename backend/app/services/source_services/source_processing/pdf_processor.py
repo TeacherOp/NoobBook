@@ -4,12 +4,15 @@ PDF Processor - Handles PDF file processing.
 Educational Note: Uses pdf_service which processes PDFs in PARALLEL using
 ThreadPoolExecutor. Result is either "ready" (all pages succeeded) or "error".
 No partial status - we either succeed completely or fail completely.
+
+Storage: Processed content is stored in Supabase Storage. Chunks are also
+stored in Supabase Storage for RAG retrieval.
 """
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
 
-from app.utils.path_utils import get_processed_dir, get_chunks_dir
+from app.services.integrations.supabase import storage_service
 from app.utils.embedding_utils import needs_embedding
 from app.services.ai_services.embedding_service import embedding_service
 from app.services.ai_services.summary_service import summary_service
@@ -118,22 +121,23 @@ def _process_embeddings(
 
     Educational Note: We ALWAYS chunk and embed every source for consistent
     retrieval. The token count is used for chunk sizing decisions.
-    """
-    processed_path = get_processed_dir(project_id) / f"{source_id}.txt"
 
-    if not processed_path.exists():
+    Storage: Processed text is downloaded from Supabase Storage. Chunks are
+    uploaded to Supabase Storage after processing.
+    """
+    # Download processed text from Supabase Storage
+    processed_text = storage_service.download_processed_file(project_id, source_id)
+
+    if not processed_text:
         return {
             "is_embedded": False,
             "embedded_at": None,
             "token_count": 0,
             "chunk_count": 0,
-            "reason": "Processed text file not found"
+            "reason": "Processed text file not found in Supabase Storage"
         }
 
     try:
-        with open(processed_path, "r", encoding="utf-8") as f:
-            processed_text = f.read()
-
         # Get embedding info (always embeds, token count used for chunking)
         _, token_count, reason = needs_embedding(text=processed_text)
 
@@ -142,13 +146,12 @@ def _process_embeddings(
         print(f"Starting embedding for {source_name} ({reason})")
 
         # Process embeddings using the embedding service
-        chunks_dir = get_chunks_dir(project_id)
+        # Note: embedding_service now uploads chunks to Supabase Storage
         return embedding_service.process_embeddings(
             project_id=project_id,
             source_id=source_id,
             source_name=source_name,
-            processed_text=processed_text,
-            chunks_dir=chunks_dir
+            processed_text=processed_text
         )
 
     except Exception as e:

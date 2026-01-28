@@ -31,7 +31,7 @@ Routes:
 - GET    /projects/<id>/sources/summary  - Aggregate stats
 - GET    /sources/allowed-types          - List allowed extensions
 """
-from flask import jsonify, request, current_app, send_file
+from flask import jsonify, request, current_app, send_file, redirect
 from app.api.sources import sources_bp
 from app.services.source_services import SourceService
 
@@ -287,12 +287,11 @@ def download_source(project_id: str, source_id: str):
     """
     Download the raw source file.
 
-    Educational Note: Returns the original uploaded file with proper
-    Content-Disposition header for browser download. MIME type is
-    preserved from upload.
+    Educational Note: Redirects to a signed Supabase Storage URL.
+    The signed URL expires after 1 hour for security.
 
     Returns:
-        Binary file data with appropriate headers
+        Redirect to signed download URL
     """
     try:
         source = source_service.get_source(project_id, source_id)
@@ -303,20 +302,17 @@ def download_source(project_id: str, source_id: str):
                 'error': 'Source not found'
             }), 404
 
-        file_path = source_service.get_source_file_path(project_id, source_id)
+        # Get signed URL from Supabase Storage
+        download_url = source_service.get_source_file_url(project_id, source_id)
 
-        if not file_path or not file_path.exists():
+        if not download_url:
             return jsonify({
                 'success': False,
-                'error': 'Source file not found on disk'
+                'error': 'Source file not found in storage'
             }), 404
 
-        return send_file(
-            file_path,
-            mimetype=source.get('mime_type', 'application/octet-stream'),
-            as_attachment=True,
-            download_name=source.get('original_filename', source.get('name'))
-        )
+        # Redirect to the signed URL
+        return redirect(download_url)
 
     except Exception as e:
         current_app.logger.error(f"Error downloading source: {e}")

@@ -16,6 +16,7 @@ import { Button } from '../../ui/button';
 import { ShareNetwork, DownloadSimple } from '@phosphor-icons/react';
 import { useToast } from '../../ui/toast';
 import type { SocialPostJob } from '@/lib/api/studio';
+import { API_HOST } from '@/lib/api/client';
 
 interface SocialPostViewerModalProps {
   viewingSocialPostJob: SocialPostJob | null;
@@ -64,7 +65,7 @@ export const SocialPostViewerModal: React.FC<SocialPostViewerModalProps> = ({
               {post.image_url && (
                 <div className="relative group">
                   <img
-                    src={`http://localhost:5000${post.image_url}`}
+                    src={post.image_url.startsWith('http') ? post.image_url : `${API_HOST}${post.image_url}`}
                     alt={`${post.platform} post`}
                     className="w-full h-auto object-cover"
                   />
@@ -74,9 +75,9 @@ export const SocialPostViewerModal: React.FC<SocialPostViewerModalProps> = ({
                       variant="secondary"
                       className="gap-1"
                       onClick={() => {
-                        if (post.image?.filename) {
+                        if (post.image?.filename && post.image_url) {
                           const link = document.createElement('a');
-                          link.href = `http://localhost:5000${post.image_url}`;
+                          link.href = post.image_url.startsWith('http') ? post.image_url : `${API_HOST}${post.image_url}`;
                           link.download = post.image.filename;
                           link.click();
                         }

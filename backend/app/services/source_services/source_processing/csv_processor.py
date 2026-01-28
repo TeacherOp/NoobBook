@@ -4,19 +4,18 @@ CSV Processor - Handles CSV file processing.
 Educational Note: CSV files are NOT chunked or embedded. Instead:
 1. csv_service (AI) analyzes the CSV using csv_analyzer tool
 2. AI generates a concise summary (300-400 tokens)
-3. Raw CSV is copied to processed folder for on-demand analysis
+3. Raw CSV content is uploaded to processed storage for on-demand analysis
 4. Summary is stored for context_loader to include in chat system prompts
 
+Storage: Processed CSV is stored in Supabase Storage for on-demand queries.
 The csv_tool_executor provides comprehensive analysis operations that can be
 used later by the csv_analyzer_agent for detailed queries.
 """
-
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
 
-from app.utils.path_utils import get_processed_dir
+from app.services.integrations.supabase import storage_service
 from app.services.ai_services.csv_service import csv_service
 
 
@@ -32,7 +31,7 @@ def process_csv(
 
     Educational Note: Unlike other sources, CSV files are NOT embedded.
     The AI service analyzes the CSV and generates a concise summary.
-    Raw CSV is copied to processed folder for on-demand queries.
+    Raw CSV content is uploaded to processed storage for on-demand queries.
 
     Args:
         project_id: The project UUID
@@ -44,9 +43,6 @@ def process_csv(
     Returns:
         Dict with success status
     """
-    processed_dir = get_processed_dir(project_id)
-    processed_path = processed_dir / f"{source_id}.csv"
-
     source_name = source.get("name", "unknown")
 
     # Use AI service to analyze CSV and generate summary
@@ -65,9 +61,26 @@ def process_csv(
         )
         return {"success": False, "error": analysis_result.get("error")}
 
-    # Copy raw CSV to processed folder (for on-demand analysis later)
-    shutil.copy(raw_file_path, processed_path)
-    print(f"[CSV Processor] Copied CSV to processed folder: {processed_path}")
+    # Read CSV content and upload to processed storage
+    with open(raw_file_path, "r", encoding="utf-8") as f:
+        csv_content = f.read()
+
+    storage_path = storage_service.upload_processed_file(
+        project_id=project_id,
+        source_id=source_id,
+        content=csv_content
+    )
+
+    if not storage_path:
+        source_service.update_source(
+            project_id,
+            source_id,
+            status="error",
+            processing_info={"error": "Failed to upload CSV to storage"}
+        )
+        return {"success": False, "error": "Failed to upload CSV to storage"}
+
+    print(f"[CSV Processor] Uploaded CSV to Supabase Storage")
 
     # Build processing info from AI analysis
     processing_info = {

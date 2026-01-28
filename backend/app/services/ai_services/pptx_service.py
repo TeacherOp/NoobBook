@@ -26,7 +26,6 @@ from app.utils import claude_parsing_utils
 from app.utils.batching_utils import create_batches, DEFAULT_BATCH_SIZE
 from app.utils.encoding_utils import encode_bytes_to_base64
 from app.utils.pdf_utils import get_page_count, get_all_page_bytes
-from app.utils.path_utils import get_processed_dir
 from app.utils.pptx_utils import convert_pptx_to_pdf
 from app.utils.rate_limit_utils import RateLimiter
 from app.utils.text import build_processed_output
@@ -199,20 +198,16 @@ class PPTXService:
                     metadata=metadata
                 )
 
-                # Save to processed directory using path_utils
-                processed_dir = get_processed_dir(project_id)
-                output_path = processed_dir / f"{source_id}.txt"
+                print(f"PPTX extraction complete: {len(all_results)} slides processed")
 
-                with open(output_path, 'w', encoding='utf-8') as f:
-                    f.write(output_content)
-
-                print(f"Saved extracted content to: {output_path}")
-
+                # Return processed content for processor to upload to Supabase Storage
                 return {
                     "success": True,
+                    "processed_content": output_content,
                     "total_slides": total_slides,
                     "slides_processed": len(all_results),
                     "character_count": character_count,
+                    "token_count": token_count,
                     "token_usage": total_tokens,
                     "model_used": model,
                     "extracted_at": datetime.now().isoformat()

@@ -46,12 +46,16 @@ Key patterns:
 - Termination tool to signal completion
 - Execution logging for debugging
 """
+
 from app.services.ai_agents.web_agent_service import web_agent_service
 from app.services.ai_agents.email_agent_service import email_agent_service
 from app.services.ai_agents.website_agent_service import website_agent_service
 from app.services.ai_agents.presentation_agent_service import presentation_agent_service
 from app.services.ai_agents.blog_agent_service import blog_agent_service
-from app.services.ai_agents.business_report_agent_service import business_report_agent_service
+from app.services.ai_agents.business_report_agent_service import (
+    business_report_agent_service,
+)
+from app.services.ai_agents.wireframe_agent_service import wireframe_agent_service
 
 __all__ = [
     "web_agent_service",
@@ -59,5 +63,6 @@ __all__ = [
     "website_agent_service",
     "presentation_agent_service",
     "blog_agent_service",
-    "business_report_agent_service"
+    "business_report_agent_service",
+    "wireframe_agent_service",
 ]

@@ -16,6 +16,7 @@ import { Button } from '../../ui/button';
 import { ScrollArea } from '../../ui/scroll-area';
 import { Article, DownloadSimple, SpinnerGap, Image as ImageIcon } from '@phosphor-icons/react';
 import { blogsAPI, type BlogJob } from '@/lib/api/studio';
+import { API_HOST } from '@/lib/api/client';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -79,7 +80,7 @@ export const BlogViewerModal: React.FC<BlogViewerModalProps> = ({
                 variant="outline"
                 size="sm"
                 onClick={() => onDownload(viewingBlogJob.id)}
-                className="flex items-center gap-1"
+                className="flex items-center gap-1 mr-4"
               >
                 <DownloadSimple size={14} />
                 Download
@@ -129,7 +130,7 @@ export const BlogViewerModal: React.FC<BlogViewerModalProps> = ({
                     img: ({ src, alt }) => {
                       // Handle IMAGE_N placeholders or direct URLs
                       const imageSrc = src?.startsWith('/api/')
-                        ? `http://localhost:5000${src}`
+                        ? `${API_HOST}${src}`
                         : src;
                       return (
                         <figure className="my-4">

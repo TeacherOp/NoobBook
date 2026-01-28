@@ -17,9 +17,8 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 from app.services.integrations.claude import claude_service
+from app.services.integrations.supabase import storage_service
 from app.config import prompt_loader
-from app.utils.text import load_chunks_for_source
-from app.utils.path_utils import get_processed_dir, get_chunks_dir
 from app.utils import claude_parsing_utils
 
 
@@ -94,7 +93,7 @@ class SummaryService:
 
     def _load_processed_content(self, project_id: str, source_id: str) -> Optional[str]:
         """
-        Load the full processed content for a source.
+        Load the full processed content for a source from Supabase Storage.
 
         Args:
             project_id: The project UUID
@@ -103,14 +102,7 @@ class SummaryService:
         Returns:
             Processed text content or None if not found
         """
-        processed_dir = get_processed_dir(project_id)
-        processed_file = processed_dir / f"{source_id}.txt"
-
-        if not processed_file.exists():
-            return None
-
-        with open(processed_file, 'r', encoding='utf-8') as f:
-            return f.read()
+        return storage_service.download_processed_file(project_id, source_id)
 
     def _load_selected_chunks(
         self,
@@ -118,7 +110,7 @@ class SummaryService:
         source_id: str
     ) -> Optional[str]:
         """
-        Load evenly distributed chunks and concatenate them.
+        Load evenly distributed chunks and concatenate them from Supabase Storage.
 
         Educational Note: For large documents, we select a sample of chunks
         to stay within our token budget while maintaining coverage of the
@@ -131,10 +123,8 @@ class SummaryService:
         Returns:
             Concatenated chunk content with separators, or None if failed
         """
-        chunks_dir = get_chunks_dir(project_id)
-
-        # Load all chunks for this source
-        all_chunks = load_chunks_for_source(source_id, chunks_dir)
+        # Load all chunks for this source from Supabase Storage
+        all_chunks = storage_service.list_source_chunks(project_id, source_id)
 
         if not all_chunks:
             return None

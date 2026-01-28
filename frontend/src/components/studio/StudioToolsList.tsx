@@ -1,30 +1,22 @@
 /**
  * StudioToolsList Component
  * Educational Note: Renders all studio tools organized by category.
- * Receives signals from chat and passes them to individual tool items.
+ * Uses StudioContext for signals and generation handling.
  */
 
 import React from 'react';
 import { ScrollArea } from '../ui/scroll-area';
 import { StudioToolItem } from './StudioToolItem';
+import { useStudioContext } from './StudioContext';
 import {
   generationOptions,
   categoryMeta,
   getSignalsForItem,
   type GenerationCategory,
-  type StudioSignal,
-  type StudioItemId,
 } from './types';
 
-interface StudioToolsListProps {
-  signals: StudioSignal[];
-  onGenerate: (optionId: StudioItemId, signals: StudioSignal[]) => void;
-}
-
-export const StudioToolsList: React.FC<StudioToolsListProps> = ({
-  signals,
-  onGenerate,
-}) => {
+export const StudioToolsList: React.FC = () => {
+  const { signals, handleGenerate } = useStudioContext();
   /**
    * Render tools for a specific category in a 2-column grid
    */
@@ -39,7 +31,7 @@ export const StudioToolsList: React.FC<StudioToolsListProps> = ({
               key={option.id}
               option={option}
               signals={itemSignals}
-              onClick={onGenerate}
+              onClick={handleGenerate}
             />
           );
         })}

@@ -4,7 +4,7 @@ Embedding Service - Orchestrates the full embedding pipeline.
 Educational Note: This service coordinates the embedding workflow:
 1. Check if source needs embedding (token count > threshold)
 2. Parse processed text into chunks (one page = one chunk)
-3. Save chunks as individual .txt files
+3. Upload chunks to Supabase Storage
 4. Create embeddings via OpenAI API
 5. Upsert vectors to Pinecone
 
@@ -13,23 +13,22 @@ It works for any source type that produces processed text.
 
 Flow:
     Source processed → embedding_service.process_embeddings() →
-    → Check tokens → Chunk text → Save chunks → Create embeddings → Upsert to Pinecone
+    → Check tokens → Chunk text → Upload chunks to Supabase → Create embeddings → Upsert to Pinecone
     → Return embedding_info for source metadata
+
+Storage: Chunks are stored in Supabase Storage for retrieval during RAG search.
 """
-from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 
 from app.utils.embedding_utils import needs_embedding
 from app.utils.text import (
     parse_extracted_text,
-    save_chunks_to_files,
     chunks_to_pinecone_format,
-    delete_chunks_for_source,
-    load_chunk_by_id
 )
 from app.services.integrations.openai import openai_service
 from app.services.integrations.pinecone import pinecone_service
+from app.services.integrations.supabase import storage_service
 
 
 class EmbeddingService:
@@ -50,8 +49,7 @@ class EmbeddingService:
         project_id: str,
         source_id: str,
         source_name: str,
-        processed_text: str,
-        chunks_dir: Path
+        processed_text: str
     ) -> Dict[str, Any]:
         """
         Process embeddings for a source if needed.
@@ -60,12 +58,14 @@ class EmbeddingService:
         workflow. It checks if embedding is needed, and if so, runs the
         full pipeline.
 
+        Storage: Chunks are uploaded to Supabase Storage for retrieval
+        during RAG search.
+
         Args:
             project_id: The project UUID (used as Pinecone namespace)
             source_id: The source UUID
             source_name: Display name of the source (for metadata)
             processed_text: The extracted/processed text content
-            chunks_dir: Directory to store chunk files
 
         Returns:
             Dict with embedding_info:
@@ -122,12 +122,18 @@ class EmbeddingService:
 
             print(f"Created {len(chunks)} chunks for {source_name}")
 
-            # Step 4: Save chunks to files
-            saved_paths = save_chunks_to_files(
-                chunks=chunks,
-                chunks_dir=chunks_dir
-            )
-            print(f"Saved {len(saved_paths)} chunk files")
+            # Step 4: Upload chunks to Supabase Storage
+            uploaded_count = 0
+            for chunk in chunks:
+                storage_path = storage_service.upload_chunk(
+                    project_id=project_id,
+                    source_id=source_id,
+                    chunk_id=chunk.chunk_id,
+                    content=chunk.text
+                )
+                if storage_path:
+                    uploaded_count += 1
+            print(f"Uploaded {uploaded_count} chunks to Supabase Storage")
 
             # Step 5: Create embeddings for all chunks
             # Educational Note: chunk.text is already cleaned by chunking_service
@@ -164,27 +170,25 @@ class EmbeddingService:
     def delete_embeddings(
         self,
         project_id: str,
-        source_id: str,
-        chunks_dir: Path
+        source_id: str
     ) -> Dict[str, Any]:
         """
         Delete embeddings and chunk files for a source.
 
         Educational Note: When a source is deleted, we need to:
         1. Delete vectors from Pinecone
-        2. Delete chunk files from disk
+        2. Delete chunk files from Supabase Storage
 
         Args:
             project_id: The project UUID (Pinecone namespace)
             source_id: The source UUID
-            chunks_dir: Directory containing chunk files
 
         Returns:
             Dict with deletion results
         """
         results = {
             "pinecone_deleted": False,
-            "chunks_deleted": 0
+            "chunks_deleted": False
         }
 
         # Delete from Pinecone
@@ -199,13 +203,13 @@ class EmbeddingService:
             except Exception as e:
                 print(f"Error deleting from Pinecone: {e}")
 
-        # Delete chunk files
-        deleted_count = delete_chunks_for_source(
-            source_id=source_id,
-            chunks_dir=chunks_dir
-        )
-        results["chunks_deleted"] = deleted_count
-        print(f"Deleted {deleted_count} chunk files for source {source_id}")
+        # Delete chunk files from Supabase Storage
+        try:
+            storage_service.delete_source_chunks(project_id, source_id)
+            results["chunks_deleted"] = True
+            print(f"Deleted chunk files from Supabase Storage for source {source_id}")
+        except Exception as e:
+            print(f"Error deleting chunks from Supabase Storage: {e}")
 
         return results
 
@@ -213,7 +217,6 @@ class EmbeddingService:
         self,
         project_id: str,
         query_text: str,
-        chunks_dir: Path,
         top_k: int = 5,
         source_filter: Optional[str] = None
     ) -> List[Dict[str, Any]]:
@@ -223,13 +226,12 @@ class EmbeddingService:
         Educational Note: This is the retrieval part of RAG:
         1. Convert query to embedding
         2. Search Pinecone for similar vectors
-        3. Load chunk text from files
+        3. Load chunk text from Supabase Storage
         4. Return results with text for AI context
 
         Args:
             project_id: The project UUID (Pinecone namespace)
             query_text: The user's search query
-            chunks_dir: Directory containing chunk files
             top_k: Number of results to return
             source_filter: Optional source_id to filter results
 
@@ -256,26 +258,32 @@ class EmbeddingService:
                 filter=pinecone_filter
             )
 
-            # Enrich results with chunk text from files
+            # Enrich results with chunk text from Supabase Storage
             enriched_results = []
             for result in search_results:
                 chunk_id = result.get("id")
-                chunk_data = load_chunk_by_id(
-                    chunk_id=chunk_id,
-                    chunks_dir=chunks_dir
-                )
+                source_id = result.get("metadata", {}).get("source_id")
+
+                # Download chunk text from Supabase Storage
+                chunk_text = None
+                if source_id and chunk_id:
+                    chunk_text = storage_service.download_chunk(
+                        project_id=project_id,
+                        source_id=source_id,
+                        chunk_id=chunk_id
+                    )
 
                 enriched_result = {
                     "chunk_id": chunk_id,
                     "score": result.get("score"),
-                    "source_id": result.get("metadata", {}).get("source_id"),
+                    "source_id": source_id,
                     "source_name": result.get("metadata", {}).get("source_name"),
                     "page_number": result.get("metadata", {}).get("page_number"),
                 }
 
-                # Add text from file if found
-                if chunk_data:
-                    enriched_result["text"] = chunk_data.get("text")
+                # Add text from Supabase Storage if found
+                if chunk_text:
+                    enriched_result["text"] = chunk_text
                 else:
                     # Fallback to metadata text (stored in Pinecone)
                     enriched_result["text"] = result.get("metadata", {}).get("text")

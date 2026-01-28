@@ -29,15 +29,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from app.services.integrations.claude import claude_service
 from app.services.background_services import task_service
+from app.services.integrations.supabase import storage_service
 from app.config import tool_loader, prompt_loader, get_anthropic_config
 from app.utils import claude_parsing_utils
 from app.utils.batching_utils import create_batches, DEFAULT_BATCH_SIZE
 from app.utils.encoding_utils import encode_bytes_to_base64
 from app.utils.pdf_utils import get_page_count, get_all_page_bytes
-from app.utils.path_utils import get_processed_dir
 from app.utils.rate_limit_utils import RateLimiter
 from app.utils.text import build_processed_output
 from app.utils.embedding_utils import count_tokens
+
+# Note: Processed output is uploaded to Supabase Storage, not saved locally
 
 
 class CancelledException(Exception):
@@ -289,10 +291,6 @@ class PDFService:
         """
         print(f"Starting BATCHED TOOL-BASED PDF extraction for source: {source_id}")
 
-        # Get output path early for cleanup on failure
-        processed_dir = get_processed_dir(project_id)
-        output_path = processed_dir / f"{source_id}.txt"
-
         try:
             # Step 1: Load configurations using centralized loaders
             prompt_config = prompt_loader.get_prompt_config("pdf_extraction")
@@ -451,17 +449,24 @@ class PDFService:
                 metadata=metadata
             )
 
-            # Save processed content
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(processed_content)
+            # Upload processed content to Supabase Storage
+            storage_path = storage_service.upload_processed_file(
+                project_id=project_id,
+                source_id=source_id,
+                content=processed_content
+            )
 
+            if not storage_path:
+                raise Exception("Failed to upload processed content to Supabase Storage")
+
+            print(f"Uploaded processed content to Supabase Storage: {storage_path}")
             print(f"Extraction complete. {total_pages}/{total_pages} pages processed.")
             print(f"Total tokens: {total_input_tokens} input, {total_output_tokens} output")
 
             return {
                 "success": True,
                 "status": "ready",
-                "extracted_text_path": str(output_path),
+                "extracted_text_path": storage_path,
                 "total_pages": total_pages,
                 "pages_processed": total_pages,
                 "character_count": total_characters,
@@ -480,9 +485,7 @@ class PDFService:
 
         except CancelledException as e:
             print(f"PDF extraction cancelled: {e}")
-            if output_path.exists():
-                output_path.unlink()
-                print(f"Deleted partial output file: {output_path}")
+            # Cleanup handled by Supabase Storage - no local files to delete
             return {
                 "success": False,
                 "status": "cancelled",
@@ -491,8 +494,6 @@ class PDFService:
 
         except FileNotFoundError as e:
             print(f"File not found: {e}")
-            if output_path.exists():
-                output_path.unlink()
             return {
                 "success": False,
                 "status": "error",
@@ -501,9 +502,7 @@ class PDFService:
 
         except Exception as e:
             print(f"PDF extraction failed: {e}")
-            if output_path.exists():
-                output_path.unlink()
-                print(f"Deleted partial output file: {output_path}")
+            # Cleanup handled by Supabase Storage - no local files to delete
             return {
                 "success": False,
                 "status": "error",

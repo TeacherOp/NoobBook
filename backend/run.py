@@ -61,7 +61,7 @@ if __name__ == '__main__':
     Educational Note: We use socketio.run instead of app.run when
     using Flask-SocketIO for WebSocket support (real-time features).
     """
-    port = int(os.getenv('PORT', 5000))
+    port = int(os.getenv('PORT', 5001))
     debug = config_name == 'development'
 
     print(f"""
@@ -82,5 +82,6 @@ if __name__ == '__main__':
         host='0.0.0.0',  # Allow connections from any IP
         port=port,
         debug=debug,
-        use_reloader=debug  # Auto-reload on code changes in debug mode
+        use_reloader=debug,  # Auto-reload on code changes in debug mode
+        allow_unsafe_werkzeug=True  # Allow Werkzeug dev server (required for Flask-SocketIO)
     )

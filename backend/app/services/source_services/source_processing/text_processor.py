@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import Dict, Any
 
 from app.utils.text import build_processed_output
-from app.utils.path_utils import get_processed_dir, get_chunks_dir
 from app.utils.embedding_utils import needs_embedding, count_tokens
 from app.services.ai_services.embedding_service import embedding_service
 from app.services.ai_services.summary_service import summary_service
+from app.services.integrations.supabase import storage_service
 
 
 def process_text(
@@ -27,21 +27,18 @@ def process_text(
     source_service
 ) -> Dict[str, Any]:
     """
-    Process a text file - save to processed folder for chunking.
+    Process a text file - upload to Supabase Storage for chunking.
 
     Args:
         project_id: The project UUID
         source_id: The source UUID
         source: Source metadata dict
-        raw_file_path: Path to the raw text file
+        raw_file_path: Path to the raw text file (temp file downloaded from Supabase)
         source_service: Reference to source_service for updates
 
     Returns:
         Dict with success status
     """
-    processed_dir = get_processed_dir(project_id)
-    processed_path = processed_dir / f"{source_id}.txt"
-
     # Read raw content
     with open(raw_file_path, "r", encoding="utf-8") as f:
         content = f.read()
@@ -69,9 +66,15 @@ def process_text(
         metadata=metadata
     )
 
-    # Save processed content
-    with open(processed_path, "w", encoding="utf-8") as f:
-        f.write(processed_content)
+    # Upload processed content to Supabase Storage
+    storage_path = storage_service.upload_processed_file(
+        project_id=project_id,
+        source_id=source_id,
+        content=processed_content
+    )
+
+    if not storage_path:
+        raise ValueError("Failed to upload processed text to storage")
 
     processing_info = {
         "processor": "text_processor",
@@ -118,6 +121,7 @@ def _process_embeddings(
 
     Educational Note: We ALWAYS chunk and embed every source for consistent
     retrieval. The token count is used for chunk sizing decisions.
+    Chunks are uploaded to Supabase Storage.
     """
     try:
         # Get embedding info (always embeds, token count used for chunking)
@@ -128,13 +132,12 @@ def _process_embeddings(
         print(f"Starting embedding for {source_name} ({reason})")
 
         # Process embeddings using the embedding service
-        chunks_dir = get_chunks_dir(project_id)
+        # Chunks are automatically uploaded to Supabase Storage
         return embedding_service.process_embeddings(
             project_id=project_id,
             source_id=source_id,
             source_name=source_name,
-            processed_text=processed_text,
-            chunks_dir=chunks_dir
+            processed_text=processed_text
         )
 
     except Exception as e:

@@ -3,21 +3,21 @@ Memory Service - Manage user and project memory storage.
 
 Educational Note: This service handles persistent memory storage for the chat system.
 Memory is stored in two types:
-- User memory: Global preferences and context that persists across all projects
-- Project memory: Project-specific context that is deleted when the project is deleted
+- User memory: Global preferences and context that persists across all projects (in users table)
+- Project memory: Project-specific context that is deleted when the project is deleted (in projects table)
 
 The service uses Haiku AI to intelligently merge new memory with existing memory,
 keeping the content concise (max 150 tokens per memory type).
+
+Storage: Supabase (users.memory and projects.memory columns)
 """
-import json
-from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
 
 from app.services.integrations.claude import claude_service
+from app.services.data_services import project_service
 from app.config import tool_loader, prompt_loader
 from app.utils import claude_parsing_utils
-from app.utils.path_utils import get_data_dir, get_project_dir
 
 
 class MemoryService:
@@ -57,37 +57,22 @@ class MemoryService:
             self._tool_def = tool_loader.load_tool("memory_tools", "manage_memory_tool")
         return self._tool_def
 
-    def _get_user_memory_path(self) -> Path:
-        """Get the path to the user memory file."""
-        return get_data_dir() / "user_memory.json"
-
-    def _get_project_memory_path(self, project_id: str) -> Path:
-        """Get the path to a project's memory file."""
-        return get_project_dir(project_id) / "memory.json"
-
     def get_user_memory(self) -> Optional[str]:
         """
-        Get the current user memory content.
+        Get the current user memory content from Supabase.
 
         Returns:
             User memory string or None if no memory exists
         """
-        memory_path = self._get_user_memory_path()
-
-        if not memory_path.exists():
-            return None
-
         try:
-            with open(memory_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data.get("memory")
+            return project_service.get_user_memory()
         except Exception as e:
             print(f"Error reading user memory: {e}")
             return None
 
     def get_project_memory(self, project_id: str) -> Optional[str]:
         """
-        Get the current project memory content.
+        Get the current project memory content from Supabase.
 
         Args:
             project_id: The project UUID
@@ -95,22 +80,18 @@ class MemoryService:
         Returns:
             Project memory string or None if no memory exists
         """
-        memory_path = self._get_project_memory_path(project_id)
-
-        if not memory_path.exists():
-            return None
-
         try:
-            with open(memory_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                return data.get("memory")
+            memory_data = project_service.get_project_memory(project_id)
+            if memory_data:
+                return memory_data.get("memory")
+            return None
         except Exception as e:
             print(f"Error reading project memory: {e}")
             return None
 
     def _save_user_memory(self, memory: str) -> bool:
         """
-        Save user memory to file.
+        Save user memory to Supabase.
 
         Args:
             memory: The memory content to save
@@ -118,23 +99,15 @@ class MemoryService:
         Returns:
             True if saved successfully
         """
-        memory_path = self._get_user_memory_path()
-
         try:
-            data = {
-                "memory": memory,
-                "updated_at": datetime.now().isoformat()
-            }
-            with open(memory_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2)
-            return True
+            return project_service.update_user_memory(memory)
         except Exception as e:
             print(f"Error saving user memory: {e}")
             return False
 
     def _save_project_memory(self, project_id: str, memory: str) -> bool:
         """
-        Save project memory to file.
+        Save project memory to Supabase.
 
         Args:
             project_id: The project UUID
@@ -143,19 +116,12 @@ class MemoryService:
         Returns:
             True if saved successfully
         """
-        memory_path = self._get_project_memory_path(project_id)
-
-        # Ensure project directory exists
-        memory_path.parent.mkdir(parents=True, exist_ok=True)
-
         try:
-            data = {
+            memory_data = {
                 "memory": memory,
                 "updated_at": datetime.now().isoformat()
             }
-            with open(memory_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2)
-            return True
+            return project_service.update_project_memory(project_id, memory_data)
         except Exception as e:
             print(f"Error saving project memory: {e}")
             return False
@@ -308,25 +274,23 @@ class MemoryService:
 
     def delete_project_memory(self, project_id: str) -> bool:
         """
-        Delete project memory file.
+        Clear project memory in Supabase.
 
         Educational Note: Called when a project is deleted to clean up
-        associated memory.
+        associated memory. With Supabase, the memory is stored in the
+        projects table and will be deleted when the project is deleted.
 
         Args:
             project_id: The project UUID
 
         Returns:
-            True if deleted or didn't exist
+            True if cleared successfully
         """
-        memory_path = self._get_project_memory_path(project_id)
-
         try:
-            if memory_path.exists():
-                memory_path.unlink()
-            return True
+            # Clear the memory by setting it to empty
+            return project_service.update_project_memory(project_id, {})
         except Exception as e:
-            print(f"Error deleting project memory: {e}")
+            print(f"Error clearing project memory: {e}")
             return False
 
 

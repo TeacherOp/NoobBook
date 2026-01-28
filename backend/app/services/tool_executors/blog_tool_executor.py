@@ -2,16 +2,16 @@
 Blog Tool Executor - Handles tool execution for blog agent.
 
 Executes: plan_blog_post, generate_blog_image, write_blog_post
+
+All files (markdown + images) are stored in Supabase Storage.
 """
 
-import os
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
-from pathlib import Path
 
 from app.services.integrations.google import imagen_service
+from app.services.integrations.supabase import storage_service
 from app.services.studio_services import studio_index_service
-from app.utils.path_utils import get_studio_dir
 
 
 class BlogToolExecutor:
@@ -89,7 +89,11 @@ class BlogToolExecutor:
         tool_input: Dict[str, Any],
         generated_images: List[Dict[str, str]]
     ) -> str:
-        """Execute generate_blog_image tool."""
+        """
+        Execute generate_blog_image tool.
+
+        Generates image via Imagen API and uploads to Supabase Storage.
+        """
         purpose = tool_input.get("purpose", "unknown")
         section_heading = tool_input.get("section_heading", "")
         image_prompt = tool_input.get("image_prompt", "")
@@ -104,26 +108,43 @@ class BlogToolExecutor:
         )
 
         try:
-            studio_dir = get_studio_dir(project_id)
-            blog_dir = Path(studio_dir) / "blogs"
-            blog_dir.mkdir(parents=True, exist_ok=True)
-
             image_index = len(generated_images) + 1
             filename_prefix = f"{job_id}_image_{image_index}"
 
-            image_result = imagen_service.generate_images(
+            # Generate image and get bytes (not saved to disk)
+            image_result = imagen_service.generate_image_bytes(
                 prompt=image_prompt,
-                output_dir=blog_dir,
-                num_images=1,
                 filename_prefix=filename_prefix,
                 aspect_ratio=aspect_ratio
             )
 
-            if not image_result.get("success") or not image_result.get("images"):
+            if not image_result.get("success"):
                 return f"Error generating image for {purpose}: {image_result.get('error', 'Unknown error')}"
 
-            image_data = image_result["images"][0]
-            filename = image_data["filename"]
+            filename = image_result["filename"]
+            image_bytes = image_result["image_bytes"]
+            content_type = image_result["content_type"]
+
+            # Upload to Supabase Storage
+            storage_path = storage_service.upload_studio_binary(
+                project_id=project_id,
+                job_type="blogs",
+                job_id=job_id,
+                filename=filename,
+                file_data=image_bytes,
+                content_type=content_type
+            )
+
+            if not storage_path:
+                return f"Error uploading image for {purpose}: Failed to upload to storage"
+
+            # Get public URL for the image
+            public_url = storage_service.get_studio_public_url(
+                project_id=project_id,
+                job_type="blogs",
+                job_id=job_id,
+                filename=filename
+            )
 
             image_info = {
                 "purpose": purpose,
@@ -131,7 +152,8 @@ class BlogToolExecutor:
                 "filename": filename,
                 "placeholder": f"IMAGE_{image_index}",
                 "alt_text": alt_text,
-                "url": f"/api/v1/projects/{project_id}/studio/blogs/{filename}"
+                "url": public_url,
+                "storage_path": storage_path
             }
             generated_images.append(image_info)
 
@@ -140,7 +162,7 @@ class BlogToolExecutor:
                 images=generated_images
             )
 
-            print(f"      Saved: {filename}")
+            print(f"      Uploaded: {filename}")
 
             return f"Image generated successfully for '{purpose}'. Use placeholder 'IMAGE_{image_index}' in your markdown: ![{alt_text}](IMAGE_{image_index})"
 
@@ -156,7 +178,11 @@ class BlogToolExecutor:
         tool_input: Dict[str, Any],
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Execute write_blog_post tool (termination)."""
+        """
+        Execute write_blog_post tool (termination).
+
+        Uploads markdown to Supabase Storage.
+        """
         markdown_content = tool_input.get("markdown_content", "")
         word_count = tool_input.get("word_count", 0)
         seo_notes = tool_input.get("seo_notes", "")
@@ -173,18 +199,29 @@ class BlogToolExecutor:
                 final_markdown = final_markdown.replace(f"({placeholder})", f"({actual_url})")
                 final_markdown = final_markdown.replace(placeholder, actual_url)
 
-            # Save markdown file
-            studio_dir = get_studio_dir(project_id)
-            blog_dir = os.path.join(studio_dir, "blogs")
-            os.makedirs(blog_dir, exist_ok=True)
-
+            # Upload markdown to Supabase Storage
             markdown_filename = f"{job_id}.md"
-            markdown_path = os.path.join(blog_dir, markdown_filename)
+            storage_path = storage_service.upload_studio_file(
+                project_id=project_id,
+                job_type="blogs",
+                job_id=job_id,
+                filename=markdown_filename,
+                content=final_markdown,
+                content_type="text/markdown; charset=utf-8"
+            )
 
-            with open(markdown_path, "w", encoding="utf-8") as f:
-                f.write(final_markdown)
+            if not storage_path:
+                raise Exception("Failed to upload markdown to storage")
 
-            print(f"      Saved: {markdown_filename}")
+            # Get public URL for the markdown
+            markdown_url = storage_service.get_studio_public_url(
+                project_id=project_id,
+                job_type="blogs",
+                job_id=job_id,
+                filename=markdown_filename
+            )
+
+            print(f"      Uploaded: {markdown_filename}")
 
             # Get job info for title
             job = studio_index_service.get_blog_job(project_id, job_id)
@@ -196,7 +233,8 @@ class BlogToolExecutor:
                 status="ready",
                 status_message="Blog post generated successfully!",
                 markdown_file=markdown_filename,
-                markdown_url=f"/api/v1/projects/{project_id}/studio/blogs/{markdown_filename}",
+                markdown_url=markdown_url,
+                storage_path=storage_path,
                 preview_url=f"/api/v1/projects/{project_id}/studio/blogs/{job_id}/preview",
                 word_count=word_count,
                 iterations=context["iterations"],
@@ -210,7 +248,8 @@ class BlogToolExecutor:
                 "job_id": job_id,
                 "title": title,
                 "markdown_file": markdown_filename,
-                "markdown_url": f"/api/v1/projects/{project_id}/studio/blogs/{markdown_filename}",
+                "markdown_url": markdown_url,
+                "storage_path": storage_path,
                 "preview_url": f"/api/v1/projects/{project_id}/studio/blogs/{job_id}/preview",
                 "images": generated_images,
                 "word_count": word_count,

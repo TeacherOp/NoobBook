@@ -124,14 +124,14 @@ def main():
       stopped_count += 1
     else:
       # Fallback to port-based killing
-      if kill_process_by_port(5000, 'Backend'):
+      if kill_process_by_port(5001, 'Backend'):
         stopped_count += 1
   else:
     # No PID file, try port-based killing
-    if kill_process_by_port(5000, 'Backend'):
+    if kill_process_by_port(5001, 'Backend'):
       stopped_count += 1
     else:
-      print_status("Backend is not running (port 5000 free)", Colors.YELLOW)
+      print_status("Backend is not running (port 5001 free)", Colors.YELLOW)
 
   # Stop frontend
   if 'frontend' in pids:

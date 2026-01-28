@@ -13,12 +13,8 @@ from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
 
 from app.services.source_services import source_index_service
-from app.utils.path_utils import (
-    get_processed_dir,
-    get_chunks_dir,
-    get_studio_scripts_dir
-)
-from app.utils.text import load_chunks_for_source
+from app.services.integrations.supabase import storage_service
+from app.utils.path_utils import get_studio_scripts_dir
 
 
 class StudioAudioExecutor:
@@ -118,25 +114,20 @@ class StudioAudioExecutor:
         source_id: str,
         source_name: str
     ) -> Tuple[str, bool]:
-        """Read full processed content for small sources."""
-        processed_dir = get_processed_dir(project_id)
-        processed_path = processed_dir / f"{source_id}.txt"
+        """Read full processed content for small sources from Supabase Storage."""
+        content = storage_service.download_processed_file(project_id, source_id)
 
-        if not processed_path.exists():
+        if not content:
             return f"Error: Processed file not found for source {source_id}", False
 
-        try:
-            content = processed_path.read_text(encoding='utf-8')
-            result = (
-                f"=== FULL SOURCE CONTENT ===\n"
-                f"Source: {source_name}\n"
-                f"Type: small source (under {self.SMALL_SOURCE_THRESHOLD} tokens)\n"
-                f"---\n\n"
-                f"{content}"
-            )
-            return result, False
-        except Exception as e:
-            return f"Error reading processed file: {str(e)}", False
+        result = (
+            f"=== FULL SOURCE CONTENT ===\n"
+            f"Source: {source_name}\n"
+            f"Type: small source (under {self.SMALL_SOURCE_THRESHOLD} tokens)\n"
+            f"---\n\n"
+            f"{content}"
+        )
+        return result, False
 
     def _read_chunk_batch(
         self,
@@ -146,14 +137,13 @@ class StudioAudioExecutor:
         start_chunk: int
     ) -> Tuple[str, bool]:
         """
-        Read a batch of 5 chunks starting from start_chunk.
+        Read a batch of 5 chunks starting from start_chunk from Supabase Storage.
 
         Educational Note: For large sources, we read 5 chunks at a time.
         Claude writes a script section, then reads the next batch, appends,
         and repeats until all chunks are covered.
         """
-        chunks_dir = get_chunks_dir(project_id)
-        chunks = load_chunks_for_source(source_id, chunks_dir)
+        chunks = storage_service.list_source_chunks(project_id, source_id)
 
         if not chunks:
             return f"Error: No chunks found for source {source_id}", False

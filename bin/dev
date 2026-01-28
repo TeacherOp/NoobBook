@@ -1,0 +1,237 @@
+#!/usr/bin/env bash
+#
+# bin/dev - Start NoobBook development environment
+#
+# Usage: bin/dev [options]
+#   --backend-only    Start only the backend server
+#   --frontend-only   Start only the frontend server
+#   --install         Install/update dependencies before starting
+#   --help            Show this help message
+#
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+BOLD='\033[1m'
+
+# Get the root directory (parent of bin/)
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BACKEND_DIR="$ROOT_DIR/backend"
+FRONTEND_DIR="$ROOT_DIR/frontend"
+
+# Get backend port from .env or use default
+BACKEND_PORT=5001
+if [ -f "$BACKEND_DIR/.env" ]; then
+    PORT_FROM_ENV=$(grep -E "^PORT=" "$BACKEND_DIR/.env" | cut -d'=' -f2 | tr -d ' ')
+    if [ -n "$PORT_FROM_ENV" ]; then
+        BACKEND_PORT="$PORT_FROM_ENV"
+    fi
+fi
+
+# Process IDs for cleanup
+BACKEND_PID=""
+FRONTEND_PID=""
+
+# Parse arguments
+BACKEND_ONLY=false
+FRONTEND_ONLY=false
+INSTALL_DEPS=false
+
+for arg in "$@"; do
+    case $arg in
+        --backend-only)
+            BACKEND_ONLY=true
+            ;;
+        --frontend-only)
+            FRONTEND_ONLY=true
+            ;;
+        --install)
+            INSTALL_DEPS=true
+            ;;
+        --help|-h)
+            echo "Usage: bin/dev [options]"
+            echo ""
+            echo "Options:"
+            echo "  --backend-only    Start only the backend server (Flask on :5001)"
+            echo "  --frontend-only   Start only the frontend server (Vite on :5173)"
+            echo "  --install         Install/update dependencies before starting"
+            echo "  --help            Show this help message"
+            echo ""
+            echo "Examples:"
+            echo "  bin/dev              # Start both backend and frontend"
+            echo "  bin/dev --install    # Install deps then start both"
+            echo "  bin/dev --backend-only"
+            exit 0
+            ;;
+    esac
+done
+
+# Cleanup function
+cleanup() {
+    echo ""
+    echo -e "${YELLOW}Shutting down...${NC}"
+
+    if [ -n "$BACKEND_PID" ] && kill -0 "$BACKEND_PID" 2>/dev/null; then
+        echo -e "${CYAN}Stopping backend (PID: $BACKEND_PID)${NC}"
+        kill "$BACKEND_PID" 2>/dev/null || true
+    fi
+
+    if [ -n "$FRONTEND_PID" ] && kill -0 "$FRONTEND_PID" 2>/dev/null; then
+        echo -e "${CYAN}Stopping frontend (PID: $FRONTEND_PID)${NC}"
+        kill "$FRONTEND_PID" 2>/dev/null || true
+    fi
+
+    # Wait a moment then force kill if needed
+    sleep 1
+
+    if [ -n "$BACKEND_PID" ] && kill -0 "$BACKEND_PID" 2>/dev/null; then
+        kill -9 "$BACKEND_PID" 2>/dev/null || true
+    fi
+
+    if [ -n "$FRONTEND_PID" ] && kill -0 "$FRONTEND_PID" 2>/dev/null; then
+        kill -9 "$FRONTEND_PID" 2>/dev/null || true
+    fi
+
+    echo -e "${GREEN}Done${NC}"
+    exit 0
+}
+
+# Set up signal handlers
+trap cleanup SIGINT SIGTERM
+
+# Print banner
+echo -e "${BOLD}${CYAN}"
+echo "  _   _             _     ____              _    "
+echo " | \ | | ___   ___ | |__ | __ )  ___   ___ | | __"
+echo " |  \| |/ _ \ / _ \| '_ \|  _ \ / _ \ / _ \| |/ /"
+echo " | |\  | (_) | (_) | |_) | |_) | (_) | (_) |   < "
+echo " |_| \_|\___/ \___/|_.__/|____/ \___/ \___/|_|\_\\"
+echo -e "${NC}"
+echo -e "${BOLD}Development Environment${NC}"
+echo ""
+
+# Check Python virtual environment
+check_backend_deps() {
+    if [ ! -d "$BACKEND_DIR/venv" ]; then
+        echo -e "${RED}Error: Backend virtual environment not found${NC}"
+        echo -e "Run: ${CYAN}cd backend && python -m venv venv && source venv/bin/activate && pip install -r requirements.txt${NC}"
+        return 1
+    fi
+
+    if [ ! -f "$BACKEND_DIR/.env" ]; then
+        echo -e "${YELLOW}Warning: backend/.env not found${NC}"
+        echo -e "Copy the template: ${CYAN}cp backend/.env.template backend/.env${NC}"
+        echo -e "Then add your API keys"
+        echo ""
+    fi
+
+    return 0
+}
+
+# Check Node.js dependencies
+check_frontend_deps() {
+    if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
+        echo -e "${YELLOW}Frontend dependencies not installed${NC}"
+        echo -e "Installing with npm install..."
+        (cd "$FRONTEND_DIR" && npm install)
+        echo ""
+    fi
+    return 0
+}
+
+# Install/update dependencies
+install_deps() {
+    echo -e "${BLUE}Installing dependencies...${NC}"
+    echo ""
+
+    # Backend
+    echo -e "${CYAN}Backend:${NC}"
+    if [ ! -d "$BACKEND_DIR/venv" ]; then
+        echo "  Creating virtual environment..."
+        (cd "$BACKEND_DIR" && python3 -m venv venv)
+    fi
+    echo "  Installing Python packages..."
+    (cd "$BACKEND_DIR" && source venv/bin/activate && pip install -r requirements.txt --quiet)
+    echo -e "  ${GREEN}Done${NC}"
+    echo ""
+
+    # Frontend
+    echo -e "${CYAN}Frontend:${NC}"
+    echo "  Installing npm packages..."
+    (cd "$FRONTEND_DIR" && npm install --silent)
+    echo -e "  ${GREEN}Done${NC}"
+    echo ""
+}
+
+# Start backend server
+start_backend() {
+    echo -e "${BLUE}Starting backend server...${NC}"
+    (
+        cd "$BACKEND_DIR"
+        source venv/bin/activate
+        python run.py 2>&1 | while IFS= read -r line; do
+            echo -e "${CYAN}[backend]${NC} $line"
+        done
+    ) &
+    BACKEND_PID=$!
+    echo -e "${GREEN}Backend starting (PID: $BACKEND_PID)${NC}"
+}
+
+# Start frontend server
+start_frontend() {
+    echo -e "${BLUE}Starting frontend server...${NC}"
+    (
+        cd "$FRONTEND_DIR"
+        npm run dev 2>&1 | while IFS= read -r line; do
+            echo -e "${YELLOW}[frontend]${NC} $line"
+        done
+    ) &
+    FRONTEND_PID=$!
+    echo -e "${GREEN}Frontend starting (PID: $FRONTEND_PID)${NC}"
+}
+
+# Main execution
+main() {
+    # Install deps if requested
+    if [ "$INSTALL_DEPS" = true ]; then
+        install_deps
+    fi
+
+    # Check and start services
+    if [ "$FRONTEND_ONLY" = true ]; then
+        check_frontend_deps || exit 1
+        start_frontend
+    elif [ "$BACKEND_ONLY" = true ]; then
+        check_backend_deps || exit 1
+        start_backend
+    else
+        check_backend_deps || exit 1
+        check_frontend_deps || exit 1
+        start_backend
+        sleep 2  # Give backend a moment to start
+        start_frontend
+    fi
+
+    echo ""
+    echo -e "${BOLD}${GREEN}Development servers running:${NC}"
+    if [ "$FRONTEND_ONLY" != true ]; then
+        echo -e "  ${CYAN}Backend:${NC}  http://localhost:$BACKEND_PORT"
+    fi
+    if [ "$BACKEND_ONLY" != true ]; then
+        echo -e "  ${YELLOW}Frontend:${NC} http://localhost:5173"
+    fi
+    echo ""
+    echo -e "${BOLD}Press Ctrl+C to stop${NC}"
+    echo ""
+
+    # Wait for processes
+    wait
+}
+
+main

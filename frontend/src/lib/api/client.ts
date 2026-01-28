@@ -7,7 +7,11 @@
 
 import axios from 'axios';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1';
+// Base host URL (without /api/v1 path) - used for file URLs, static assets
+export const API_HOST = import.meta.env.VITE_API_HOST || 'http://localhost:5001';
+
+// Full API URL (with /api/v1 path) - used for API requests
+const API_BASE_URL = import.meta.env.VITE_API_URL || `${API_HOST}/api/v1`;
 
 export const api = axios.create({
   baseURL: API_BASE_URL,

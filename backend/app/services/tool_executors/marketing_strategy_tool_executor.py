@@ -5,11 +5,10 @@ Tool handlers extracted from marketing_strategy_agent_service.py for separation 
 Agent handles orchestration, executor handles tool-specific logic.
 """
 
-import os
 from typing import Dict, Any, Tuple
 from datetime import datetime
 
-from app.utils.path_utils import get_studio_dir
+from app.services.integrations.supabase import storage_service
 from app.services.studio_services import studio_index_service
 
 
@@ -128,34 +127,30 @@ class MarketingStrategyToolExecutor:
         print(f"      Writing section {actual_section_number}: {section_title} (is_last: {is_last_section})")
 
         try:
-            # Prepare output directory
-            studio_dir = get_studio_dir(project_id)
-            marketing_strategy_dir = os.path.join(studio_dir, "marketing_strategies")
-            os.makedirs(marketing_strategy_dir, exist_ok=True)
-
-            # File path
             markdown_filename = f"{job_id}.md"
-            file_path = os.path.join(marketing_strategy_dir, markdown_filename)
 
             # Get job info for document title and total sections
             job = studio_index_service.get_marketing_strategy_job(project_id, job_id)
             document_title = job.get("document_title", "Marketing Strategy Document") if job else "Marketing Strategy Document"
             total_sections = job.get("total_sections", 0) if job else 0
 
-            # Write or append content
+            # Write or append content to Supabase Storage
             if operation == "write":
                 # First section - create file with title
-                with open(file_path, "w", encoding="utf-8") as f:
-                    f.write(f"# {document_title}\n\n")
-                    f.write(f"*Generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}*\n\n")
-                    f.write("---\n\n")
-                    f.write(markdown_content)
-                    f.write("\n\n")
+                content = f"# {document_title}\n\n"
+                content += f"*Generated on {datetime.now().strftime('%Y-%m-%d %H:%M')}*\n\n"
+                content += "---\n\n"
+                content += markdown_content
+                content += "\n\n"
+                storage_service.upload_studio_file(
+                    project_id, "marketing_strategies", job_id, markdown_filename, content
+                )
             else:
                 # Subsequent sections - append
-                with open(file_path, "a", encoding="utf-8") as f:
-                    f.write(markdown_content)
-                    f.write("\n\n")
+                content = markdown_content + "\n\n"
+                storage_service.append_studio_file(
+                    project_id, "marketing_strategies", job_id, markdown_filename, content
+                )
 
             studio_index_service.update_marketing_strategy_job(
                 project_id, job_id,
@@ -173,7 +168,7 @@ class MarketingStrategyToolExecutor:
                 remaining = total_sections - actual_section_number
                 result_msg += f" Progress: {actual_section_number}/{total_sections} sections complete. {remaining} section(s) remaining."
 
-            return result_msg, is_last_section, file_path
+            return result_msg, is_last_section, markdown_filename
 
         except Exception as e:
             error_msg = f"Error writing section {actual_section_number}: {str(e)}"

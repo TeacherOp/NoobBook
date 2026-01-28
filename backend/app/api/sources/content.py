@@ -49,8 +49,9 @@ Routes:
 from flask import jsonify, current_app, send_file
 from app.api.sources import sources_bp
 from app.utils.citation_utils import get_chunk_content
-from app.utils.path_utils import get_ai_images_dir, get_processed_dir
+from app.utils.path_utils import get_ai_images_dir
 from app.services.source_services import source_service
+from app.services.integrations.supabase import storage_service
 
 
 @sources_bp.route('/projects/<project_id>/citations/<chunk_id>', methods=['GET'])
@@ -189,7 +190,8 @@ def get_processed_content(project_id: str, source_id: str):
     Get the processed text content of a source for viewing in the Sources panel.
 
     Educational Note: This endpoint enables users to view the extracted/processed
-    text from their sources. The processed files contain:
+    text from their sources. The processed files are stored in Supabase Storage
+    and contain:
     - A metadata header (which we strip out)
     - Page markers like "=== PDF PAGE 1 of 5 ==="
     - The actual extracted text content
@@ -237,27 +239,23 @@ def get_processed_content(project_id: str, source_id: str):
                 'error': 'Source is not processed yet'
             }), 400
 
-        # Check if source type is viewable
-        file_extension = source.get('file_extension', '').lower()
+        # Check if source type is viewable (get extension from embedding_info)
+        embedding_info = source.get('embedding_info', {})
+        file_extension = embedding_info.get('file_extension', '').lower()
         if file_extension in NON_VIEWABLE_EXTENSIONS:
             return jsonify({
                 'success': False,
                 'error': f'Source type {file_extension} is not viewable'
             }), 400
 
-        # Get the processed file path
-        processed_dir = get_processed_dir(project_id)
-        processed_file = processed_dir / f"{source_id}.txt"
+        # Download processed content from Supabase Storage
+        full_content = storage_service.download_processed_file(project_id, source_id)
 
-        if not processed_file.exists():
+        if not full_content:
             return jsonify({
                 'success': False,
                 'error': 'Processed file not found'
             }), 404
-
-        # Read the processed file
-        with open(processed_file, 'r', encoding='utf-8') as f:
-            full_content = f.read()
 
         # Strip the metadata header (everything before "# ---")
         # The header format is:

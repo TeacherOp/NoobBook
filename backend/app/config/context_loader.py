@@ -80,11 +80,11 @@ class ContextLoader:
         for source in active_sources:
             source_id = source.get("id", "")
             name = source.get("name", "Unknown")
-            category = source.get("category", "unknown")
-            file_ext = source.get("file_extension", "")
+            source_type_field = source.get("type", "unknown")  # Database field is 'type'
 
-            # Check if embedded
+            # Get embedding info (contains file_extension and is_embedded)
             embedding_info = source.get("embedding_info", {})
+            file_ext = embedding_info.get("file_extension", "")
             is_embedded = embedding_info.get("is_embedded", False)
             embedded_label = "Yes" if is_embedded else "No"
 
@@ -92,8 +92,8 @@ class ContextLoader:
             summary_info = source.get("summary_info", {})
             summary_text = summary_info.get("summary", "")
 
-            # Format source type from category and extension
-            source_type = self._format_source_type(category, file_ext)
+            # Format source type from type field and extension
+            source_type = self._format_source_type(source_type_field.lower(), file_ext)
 
             lines.append(f"- **{name}**")
             lines.append(f"  - ID: `{source_id}`")

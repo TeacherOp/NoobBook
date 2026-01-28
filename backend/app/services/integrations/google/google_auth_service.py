@@ -20,7 +20,7 @@ Required Setup:
     1. Create project at https://console.cloud.google.com
     2. Enable Google Drive API
     3. Create OAuth 2.0 credentials (Web application)
-    4. Add http://localhost:5000/api/v1/google/callback as redirect URI
+    4. Add http://localhost:5001/api/v1/google/callback as redirect URI
     5. Copy Client ID and Client Secret to App Settings
 """
 
@@ -63,7 +63,7 @@ class GoogleAuthService:
 
     # Redirect URI for OAuth callback
     # Educational Note: Must match exactly what's configured in Google Console
-    REDIRECT_URI = 'http://localhost:5000/api/v1/google/callback'
+    REDIRECT_URI = 'http://localhost:5001/api/v1/google/callback'
 
     def __init__(self):
         """Initialize the Google Auth service."""

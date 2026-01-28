@@ -25,7 +25,11 @@ interface ChatHeaderProps {
   onShowChatList: () => void;
 }
 
-export const ChatHeader: React.FC<ChatHeaderProps> = ({
+/**
+ * Memoized to prevent re-renders when typing in ChatInput
+ * Only re-renders when its props actually change
+ */
+export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(({
   activeChat,
   allChats,
   activeSources,
@@ -89,4 +93,4 @@ export const ChatHeader: React.FC<ChatHeaderProps> = ({
       </p>
     </div>
   );
-};
+});

@@ -49,7 +49,7 @@ export const PresentationViewerModal: React.FC<PresentationViewerModalProps> = (
     if (viewingPresentationJob && viewingPresentationJob.screenshots?.length > 0) {
       const screenshot = viewingPresentationJob.screenshots[currentSlide - 1];
       if (screenshot && screenshot.screenshot_file) {
-        // API_BASE_URL already includes http://localhost:5000/api/v1
+        // API_BASE_URL already includes /api/v1 path
         const url = presentationsAPI.getScreenshotUrl(
           projectId,
           viewingPresentationJob.id,
@@ -81,7 +81,7 @@ export const PresentationViewerModal: React.FC<PresentationViewerModalProps> = (
       onDownloadPptx(viewingPresentationJob.id);
     } else {
       const link = document.createElement('a');
-      // API_BASE_URL already includes http://localhost:5000/api/v1
+      // API_BASE_URL already includes /api/v1 path
       link.href = presentationsAPI.getDownloadUrl(
         projectId,
         viewingPresentationJob.id,

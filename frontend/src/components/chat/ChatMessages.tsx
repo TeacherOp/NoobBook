@@ -429,11 +429,13 @@ const LoadingIndicator: React.FC = () => (
   </div>
 );
 
-export const ChatMessages: React.FC<ChatMessagesProps> = ({
-  messages,
-  sending,
-  projectId,
-}) => {
+/**
+ * ChatMessages Component - Memoized to prevent re-renders on parent state changes
+ * Educational Note: Without React.memo, every keystroke in ChatInput would
+ * re-render this entire component (expensive markdown parsing). Memoization
+ * ensures it only re-renders when messages, sending, or projectId actually change.
+ */
+export const ChatMessages: React.FC<ChatMessagesProps> = React.memo(({ messages, sending, projectId }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -515,4 +517,4 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({
       </div>
     </div>
   );
-};
+});

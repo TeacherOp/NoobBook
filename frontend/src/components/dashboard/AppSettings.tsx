@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
-import { ScrollArea } from '../ui/scroll-area';
 import { Separator } from '../ui/separator';
 import {
   Dialog,
@@ -503,23 +502,22 @@ export const AppSettings: React.FC<AppSettingsProps> = ({ open, onOpenChange }) 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl max-h-[90vh] bg-card">
-        <DialogHeader>
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col bg-card">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle>App Settings</DialogTitle>
           <DialogDescription>
             Configure API keys and application settings. Keys are automatically saved after successful validation.
           </DialogDescription>
         </DialogHeader>
 
-        {/* Scrollable content with fade indicator */}
-        <div className="relative">
-          <ScrollArea className="h-[550px]">
+        {/* Scrollable content */}
+        <div className="flex-1 min-h-0 overflow-y-auto max-h-[60vh] pr-2">
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <CircleNotch size={32} className="animate-spin" />
             </div>
           ) : (
-            <div className="space-y-6 px-1 pb-12">
+            <div className="space-y-6 pr-2 pb-12">
               <div className="space-y-4">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Warning size={16} />
@@ -656,7 +654,7 @@ export const AppSettings: React.FC<AppSettingsProps> = ({ open, onOpenChange }) 
                         Google Cloud Console
                       </a>
                       {' '}and add{' '}
-                      <code className="text-xs bg-muted px-1 rounded">http://localhost:5000/api/v1/google/callback</code>
+                      <code className="text-xs bg-muted px-1 rounded">http://localhost:5001/api/v1/google/callback</code>
                       {' '}as a redirect URI.
                     </p>
                   </div>
@@ -664,16 +662,9 @@ export const AppSettings: React.FC<AppSettingsProps> = ({ open, onOpenChange }) 
               </div>
             </div>
           )}
-          </ScrollArea>
-          {/* Bottom fade gradient to indicate more content */}
-          <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-card to-transparent pointer-events-none" />
         </div>
 
-        <p className="text-xs text-muted-foreground text-center py-2">
-          Scroll to see all settings
-        </p>
-
-        <DialogFooter>
+        <DialogFooter className="flex-shrink-0 border-t pt-4">
           {Object.keys(modifiedKeys).length > 0 ? (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>

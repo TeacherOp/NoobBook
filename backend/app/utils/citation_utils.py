@@ -7,19 +7,18 @@ Format: [[cite:CHUNK_ID]] where chunk_id = {source_id}_page_{page}_chunk_{n}
 When Claude cites a source with [[cite:chunk_id]], the frontend fetches
 the chunk content to display in a tooltip/popover.
 
-Chunk files are stored at:
-    data/projects/{project_id}/sources/chunks/{source_id}/{source_id}_chunk_{n}.txt
+Chunk files are stored in Supabase Storage at:
+    chunks/{project_id}/{source_id}/{chunk_id}.txt
 
-Each chunk file has a metadata header followed by the text content.
+Each chunk file contains the chunk text content.
 """
 
 import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 
-from config import Config
-from app.utils.path_utils import get_chunks_dir
-from app.utils.text import load_chunk_by_id
+from app.services.integrations.supabase import storage_service
+from app.services.source_services import source_index_service
 
 
 def parse_chunk_id(chunk_id: str) -> Optional[Dict[str, Any]]:
@@ -58,8 +57,8 @@ def get_chunk_content(
     Get content for a chunk by its chunk_id.
 
     Educational Note: This is the main function used by the frontend to
-    fetch citation content. It loads the chunk file and returns the text
-    along with metadata for display.
+    fetch citation content. It downloads the chunk from Supabase Storage
+    and returns the text along with metadata for display.
 
     Args:
         project_id: The project UUID
@@ -81,22 +80,29 @@ def get_chunk_content(
     if not parsed:
         return None
 
-    # Get chunks directory
-    chunks_dir = get_chunks_dir(project_id)
+    source_id = parsed["source_id"]
 
-    # Load chunk using the text utils function
-    chunk_data = load_chunk_by_id(chunk_id, chunks_dir)
+    # Download chunk from Supabase Storage
+    chunk_text = storage_service.download_chunk(
+        project_id=project_id,
+        source_id=source_id,
+        chunk_id=chunk_id
+    )
 
-    if not chunk_data:
+    if not chunk_text:
         return None
 
+    # Get source name from source index
+    source = source_index_service.get_source_from_index(project_id, source_id)
+    source_name = source.get("name", "Unknown") if source else "Unknown"
+
     return {
-        "content": chunk_data.get("text", ""),
+        "content": chunk_text,
         "chunk_id": chunk_id,
-        "source_id": chunk_data.get("source_id"),
-        "source_name": chunk_data.get("source_name"),
-        "page_number": chunk_data.get("page_number"),
-        "chunk_index": chunk_data.get("chunk_index", 1)
+        "source_id": source_id,
+        "source_name": source_name,
+        "page_number": parsed["page_number"],
+        "chunk_index": parsed["chunk_index"]
     }
 
 

@@ -11,16 +11,13 @@ Educational Note: This service implements a smart search strategy:
 The executor returns chunk_ids that Claude uses for citations.
 Citation format: [[cite:CHUNK_ID]] where CHUNK_ID = {source_id}_page_{page}_chunk_{n}
 """
-from pathlib import Path
 from typing import Dict, Any, Optional, List
 from difflib import SequenceMatcher
 
-from config import Config
 from app.services.source_services import source_service
 from app.services.integrations.openai import openai_service
 from app.services.integrations.pinecone import pinecone_service
-from app.utils.text import load_chunks_for_source
-from app.utils.path_utils import get_chunks_dir
+from app.services.integrations.supabase import storage_service
 
 
 class SourceSearchExecutor:
@@ -45,7 +42,7 @@ class SourceSearchExecutor:
 
     def __init__(self):
         """Initialize the executor."""
-        self.projects_dir = Config.PROJECTS_DIR
+        pass
 
     def execute(
         self,
@@ -125,8 +122,8 @@ class SourceSearchExecutor:
         Returns:
             Dict with all chunks and their chunk_ids
         """
-        chunks_dir = get_chunks_dir(project_id)
-        all_chunks = load_chunks_for_source(source_id, chunks_dir)
+        # Load chunks from Supabase Storage
+        all_chunks = storage_service.list_source_chunks(project_id, source_id)
 
         if not all_chunks:
             return {
@@ -174,9 +171,8 @@ class SourceSearchExecutor:
         """
         results = []
 
-        # Load all chunks once for local search
-        chunks_dir = get_chunks_dir(project_id)
-        all_chunks = load_chunks_for_source(source_id, chunks_dir)
+        # Load all chunks from Supabase Storage for local search
+        all_chunks = storage_service.list_source_chunks(project_id, source_id)
 
         if not all_chunks:
             return {

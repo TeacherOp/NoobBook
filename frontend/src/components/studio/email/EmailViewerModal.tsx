@@ -21,6 +21,7 @@ import {
 import { Button } from '../../ui/button';
 import { ShareNetwork, DownloadSimple } from '@phosphor-icons/react';
 import { emailsAPI, type EmailJob } from '@/lib/api/studio';
+import { API_HOST } from '@/lib/api/client';
 
 interface EmailViewerModalProps {
   projectId: string;
@@ -54,7 +55,7 @@ export const EmailViewerModal: React.FC<EmailViewerModalProps> = ({
             {/* Preview iframe */}
             <div className="relative rounded-lg overflow-hidden border bg-gray-50 dark:bg-gray-900 mb-4">
               <iframe
-                src={`http://localhost:5000${viewingEmailJob.preview_url}`}
+                src={`${API_HOST}${viewingEmailJob.preview_url}`}
                 className="w-full h-[600px]"
                 title="Email template preview"
                 sandbox="allow-same-origin"
@@ -106,7 +107,7 @@ export const EmailViewerModal: React.FC<EmailViewerModalProps> = ({
                 onClick={() => {
                   const downloadUrl = emailsAPI.getDownloadUrl(projectId, viewingEmailJob.id);
                   const link = document.createElement('a');
-                  link.href = `http://localhost:5000${downloadUrl}`;
+                  link.href = `${API_HOST}${downloadUrl}`;
                   link.click();
                 }}
               >
@@ -120,7 +121,7 @@ export const EmailViewerModal: React.FC<EmailViewerModalProps> = ({
                 onClick={() => {
                   if (viewingEmailJob.html_url) {
                     const link = document.createElement('a');
-                    link.href = `http://localhost:5000${viewingEmailJob.html_url}`;
+                    link.href = `${API_HOST}${viewingEmailJob.html_url}`;
                     link.download = viewingEmailJob.html_file || 'email_template.html';
                     link.click();
                   }

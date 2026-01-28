@@ -21,6 +21,8 @@ from app.services.source_services.source_upload import (
     upload_text,
     upload_research
 )
+# Note: Local path utils kept for backwards compatibility with other processors
+# that haven't been migrated to Supabase Storage yet
 from app.utils.path_utils import (
     get_raw_dir,
     get_processed_dir,
@@ -67,24 +69,68 @@ class SourceService:
         """
         return source_index_service.get_source_from_index(project_id, source_id)
 
-    def get_source_file_path(self, project_id: str, source_id: str) -> Optional[Path]:
+    def get_source_file_url(self, project_id: str, source_id: str) -> Optional[str]:
         """
-        Get the file path for a source's raw file.
+        Get a signed URL for downloading a source's raw file from Supabase Storage.
 
         Args:
             project_id: The project UUID
             source_id: The source UUID
 
         Returns:
-            Path to the raw file or None if not found
+            Signed URL for the raw file or None if not found
         """
+        from app.services.integrations.supabase import storage_service
+
         source = self.get_source(project_id, source_id)
         if not source:
             return None
 
-        file_path = get_raw_dir(project_id) / source["stored_filename"]
-        if file_path.exists():
-            return file_path
+        # Get stored filename from embedding_info
+        embedding_info = source.get("embedding_info", {})
+        stored_filename = embedding_info.get("stored_filename", "")
+
+        if not stored_filename:
+            return None
+
+        return storage_service.get_raw_file_url(
+            project_id=project_id,
+            source_id=source_id,
+            filename=stored_filename
+        )
+
+    def get_source_file_data(self, project_id: str, source_id: str) -> Optional[tuple]:
+        """
+        Download a source's raw file from Supabase Storage.
+
+        Args:
+            project_id: The project UUID
+            source_id: The source UUID
+
+        Returns:
+            Tuple of (file_data bytes, stored_filename) or None if not found
+        """
+        from app.services.integrations.supabase import storage_service
+
+        source = self.get_source(project_id, source_id)
+        if not source:
+            return None
+
+        # Get stored filename from embedding_info
+        embedding_info = source.get("embedding_info", {})
+        stored_filename = embedding_info.get("stored_filename", "")
+
+        if not stored_filename:
+            return None
+
+        file_data = storage_service.download_raw_file(
+            project_id=project_id,
+            source_id=source_id,
+            filename=stored_filename
+        )
+
+        if file_data:
+            return (file_data, stored_filename)
 
         return None
 
@@ -128,9 +174,9 @@ class SourceService:
             updates["status"] = status
             # Auto-activate when status becomes ready
             if status == "ready":
-                updates["active"] = True
+                updates["is_active"] = True
         if active is not None:
-            updates["active"] = active
+            updates["is_active"] = active
         if processing_info is not None:
             updates["processing_info"] = processing_info
         if embedding_info is not None:
@@ -166,28 +212,28 @@ class SourceService:
         if not source:
             return False
 
-        # Delete embeddings and chunk files (if any)
+        # Delete embeddings and chunk files from Supabase Storage (if any)
         if source.get("embedding_info", {}).get("is_embedded"):
             try:
                 from app.services.ai_services.embedding_service import embedding_service
-                chunks_dir = get_chunks_dir(project_id)
                 embedding_service.delete_embeddings(
                     project_id=project_id,
-                    source_id=source_id,
-                    chunks_dir=chunks_dir
+                    source_id=source_id
                 )
             except Exception as e:
                 print(f"Error deleting embeddings for {source_id}: {e}")
 
-        # Delete the raw file
-        file_path = get_raw_dir(project_id) / source["stored_filename"]
-        if file_path.exists():
-            file_path.unlink()
+        # Delete all files from Supabase Storage
+        from app.services.integrations.supabase import storage_service
 
-        # Delete the processed file (if exists)
-        processed_path = get_processed_dir(project_id) / f"{source_id}.txt"
-        if processed_path.exists():
-            processed_path.unlink()
+        # Get stored filename from embedding_info
+        embedding_info = source.get("embedding_info", {})
+        stored_filename = embedding_info.get("stored_filename", "")
+
+        if stored_filename:
+            # Delete raw file, processed file, and chunks
+            storage_service.delete_source_files(project_id, source_id, stored_filename)
+            print(f"Deleted source files from Supabase Storage: {source_id}")
 
         # Remove from index
         source_index_service.remove_source_from_index(project_id, source_id)

@@ -39,7 +39,7 @@ class AudioOverviewService:
     """
 
     AGENT_NAME = "audio_overview"
-    MAX_ITERATIONS = 100  # High limit - let Claude finish naturally
+    MAX_ITERATIONS = 25  # Reasonable limit - most scripts finish in 5-15 iterations
 
     def __init__(self):
         """Initialize service with lazy-loaded config and tools."""
@@ -272,15 +272,21 @@ class AudioOverviewService:
 
         total_input_tokens = 0
         total_output_tokens = 0
+        last_batch_seen = False  # Track if we've seen "last batch" message
+        iterations_since_last_batch = 0  # Track iterations after last batch
+        full_content_seen = False  # Track if we've seen full content (small source)
 
-        for iteration in range(1, self.MAX_ITERATIONS + 1):
+        # Smaller limit for small sources (should finish in 2-3 iterations)
+        max_iterations = 5 if not is_large else self.MAX_ITERATIONS
+
+        for iteration in range(1, max_iterations + 1):
             # Update progress
             studio_index_service.update_audio_job(
                 project_id, job_id,
                 progress=f"Generating script (step {iteration})..."
             )
 
-            print(f"    Iteration {iteration}/{self.MAX_ITERATIONS}")
+            print(f"    Iteration {iteration}/{max_iterations}")
 
             # Call Claude API
             response = claude_service.send_message(
@@ -334,6 +340,16 @@ class AudioOverviewService:
                     if completed:
                         is_complete = True
 
+                    # Track if this is the last batch of content
+                    if "This is the last batch" in result:
+                        last_batch_seen = True
+                        print(f"      Last batch detected at iteration {iteration}")
+
+                    # Track if we've seen full content (small source)
+                    if "FULL SOURCE CONTENT" in result:
+                        full_content_seen = True
+                        print(f"      Full content (small source) at iteration {iteration}")
+
             # Add tool results to messages
             if tool_results:
                 messages.append({"role": "user", "content": tool_results})
@@ -349,6 +365,23 @@ class AudioOverviewService:
                         "output_tokens": total_output_tokens
                     }
                 }
+
+            # Force completion if we've seen all content and Claude isn't finishing
+            if last_batch_seen or full_content_seen:
+                iterations_since_last_batch += 1
+                # Give Claude 2 extra iterations to finish properly
+                if iterations_since_last_batch >= 2 and script_path.exists():
+                    reason = "last batch" if last_batch_seen else "full content"
+                    print(f"    Forcing completion after {iteration} iterations ({reason} seen)")
+                    return {
+                        "success": True,
+                        "iterations": iteration,
+                        "usage": {
+                            "input_tokens": total_input_tokens,
+                            "output_tokens": total_output_tokens
+                        },
+                        "note": f"Script generation forced after {reason}"
+                    }
 
             # Check for end_turn without tool use (shouldn't happen, but handle it)
             if claude_parsing_utils.is_end_turn(response) and not tool_results:
@@ -372,22 +405,22 @@ class AudioOverviewService:
                     }
 
         # Max iterations reached
-        print(f"    Max iterations reached ({self.MAX_ITERATIONS})")
+        print(f"    Max iterations reached ({max_iterations})")
         if script_path.exists():
             return {
                 "success": True,
-                "iterations": self.MAX_ITERATIONS,
+                "iterations": max_iterations,
                 "usage": {
                     "input_tokens": total_input_tokens,
                     "output_tokens": total_output_tokens
                 },
-                "note": f"Script generation used all {self.MAX_ITERATIONS} iterations"
+                "note": f"Script generation used all {max_iterations} iterations"
             }
         else:
             return {
                 "success": False,
-                "error": f"Max iterations reached ({self.MAX_ITERATIONS}) without completing script",
-                "iterations": self.MAX_ITERATIONS
+                "error": f"Max iterations reached ({max_iterations}) without completing script",
+                "iterations": max_iterations
             }
 
 

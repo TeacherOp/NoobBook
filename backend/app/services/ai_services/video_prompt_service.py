@@ -5,13 +5,12 @@ Educational Note: This is a simple AI service that uses Claude to generate
 detailed, vivid video prompts from source content. The generated prompts are
 then used with Google Veo 2.0 for video generation.
 """
-import os
 from typing import Dict, Any
 
 from app.services.integrations.claude import claude_service
+from app.services.integrations.supabase import storage_service
 from app.config import prompt_loader
 from app.utils import claude_parsing_utils
-from app.utils.path_utils import get_sources_dir
 
 
 class VideoPromptService:
@@ -100,7 +99,7 @@ Generate a clear, vivid video prompt (2-4 sentences) that describes what should 
 
     def _get_source_content(self, project_id: str, source_id: str) -> str:
         """
-        Get source content for prompt generation.
+        Get source content for prompt generation from Supabase Storage.
 
         Educational Note: Sample chunks for large sources, use full content for small ones.
         """
@@ -111,49 +110,39 @@ Generate a clear, vivid video prompt (2-4 sentences) that describes what should 
             if not source:
                 return "Error: Source not found"
 
-            # Get processed content
-            sources_dir = get_sources_dir(project_id)
-            processed_path = os.path.join(sources_dir, "processed", f"{source_id}.txt")
+            # Try to get processed content from Supabase Storage
+            full_content = storage_service.download_processed_file(project_id, source_id)
 
-            if not os.path.exists(processed_path):
+            if not full_content:
                 return f"Source: {source.get('name', 'Unknown')}\n(Content not yet processed)"
-
-            with open(processed_path, "r", encoding="utf-8") as f:
-                full_content = f.read()
 
             # If content is small enough, use it all
             if len(full_content) < 10000:  # ~2500 tokens
                 return full_content
 
-            # For large sources, sample chunks
-            chunks_dir = os.path.join(sources_dir, "chunks", source_id)
-            if not os.path.exists(chunks_dir):
+            # For large sources, get chunks from Supabase Storage
+            chunks = storage_service.list_source_chunks(project_id, source_id)
+
+            if not chunks:
                 # No chunks, return truncated content
-                return full_content[:10000] + "\n\n[Content truncated...]"
-
-            # Get all chunks
-            chunk_files = sorted([
-                f for f in os.listdir(chunks_dir)
-                if f.endswith(".txt") and f.startswith(source_id)
-            ])
-
-            if not chunk_files:
                 return full_content[:10000] + "\n\n[Content truncated...]"
 
             # Sample up to 6 chunks evenly distributed
             max_chunks = 6
-            if len(chunk_files) <= max_chunks:
-                selected_chunks = chunk_files
-            else:
-                step = len(chunk_files) / max_chunks
-                selected_chunks = [chunk_files[int(i * step)] for i in range(max_chunks)]
+            total_chunks = len(chunks)
 
-            # Read selected chunks
+            if total_chunks <= max_chunks:
+                selected_indices = range(total_chunks)
+            else:
+                step = total_chunks / max_chunks
+                selected_indices = [int(i * step) for i in range(max_chunks)]
+
+            # Get content from selected chunks
             sampled_content = []
-            for chunk_file in selected_chunks:
-                chunk_path = os.path.join(chunks_dir, chunk_file)
-                with open(chunk_path, "r", encoding="utf-8") as f:
-                    sampled_content.append(f.read())
+            for idx in selected_indices:
+                if idx < total_chunks:
+                    chunk_text = chunks[idx].get("text", "")
+                    sampled_content.append(chunk_text)
 
             return "\n\n".join(sampled_content)
 

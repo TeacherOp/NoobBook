@@ -8,7 +8,8 @@ import os
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
 
-from app.utils.path_utils import get_studio_dir, get_sources_dir
+from app.utils.path_utils import get_studio_dir
+from app.services.integrations.supabase import storage_service
 from app.services.studio_services import studio_index_service
 from app.services.ai_agents.csv_analyzer_agent import csv_analyzer_agent
 
@@ -186,14 +187,11 @@ class BusinessReportToolExecutor:
         print(f"      Searching source {source_id[:8]}... for: {search_query[:30]}")
 
         try:
-            sources_dir = get_sources_dir(project_id)
-            processed_path = os.path.join(sources_dir, "processed", f"{source_id}.txt")
+            # Get content from Supabase Storage
+            content = storage_service.download_processed_file(project_id, source_id)
 
-            if not os.path.exists(processed_path):
+            if not content:
                 return f"Source content not found for {source_id}"
-
-            with open(processed_path, "r", encoding="utf-8") as f:
-                content = f.read()
 
             # Return a sample of the content
             max_length = 3000

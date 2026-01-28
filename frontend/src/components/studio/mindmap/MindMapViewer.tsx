@@ -28,7 +28,7 @@ import '@xyflow/react/dist/style.css';
 import { calculateMindMapLayout, NODE_COLORS } from './mindMapLayout';
 import type { MindMapNode } from '@/lib/api/studio';
 import { Button } from '@/components/ui/button';
-import { Plus, Minus, MagnifyingGlass, ArrowsOutSimple, CaretRight } from '@phosphor-icons/react';
+import { Plus, Minus, MagnifyingGlassPlus, MagnifyingGlassMinus, ArrowsOutSimple, CaretRight } from '@phosphor-icons/react';
 
 interface MindMapNodeData {
   label: string;
@@ -273,13 +273,14 @@ function MindMapViewerInner({ nodes: mindMapNodes }: MindMapViewerProps) {
     setEdges(layoutEdges);
   }, [nodesWithHandlers, layoutEdges, setNodes, setEdges]);
 
-  // Fit view when nodes change
+  // Fit view only on initial load (when rootId changes)
+  // Don't reset zoom on expand/collapse - let user control zoom
   useEffect(() => {
     const timer = setTimeout(() => {
       fitView({ padding: 0.2, duration: 300 });
     }, 50);
     return () => clearTimeout(timer);
-  }, [visibleNodeIds.size, fitView]);
+  }, [rootId, fitView]); // Only depends on rootId, not visibleNodeIds.size
 
   // Selected node for details panel
   const [selectedNode, setSelectedNode] = useState<MindMapNode | null>(null);
@@ -339,8 +340,7 @@ function MindMapViewerInner({ nodes: mindMapNodes }: MindMapViewerProps) {
             className="h-7 w-7 p-0"
             title="Zoom out"
           >
-            <MagnifyingGlass size={16} weight="bold" />
-            <span className="sr-only">-</span>
+            <MagnifyingGlassMinus size={16} />
           </Button>
           <Button
             variant="ghost"
@@ -349,8 +349,7 @@ function MindMapViewerInner({ nodes: mindMapNodes }: MindMapViewerProps) {
             className="h-7 w-7 p-0"
             title="Zoom in"
           >
-            <MagnifyingGlass size={16} weight="bold" />
-            <span className="sr-only">+</span>
+            <MagnifyingGlassPlus size={16} />
           </Button>
           <Button
             variant="ghost"

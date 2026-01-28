@@ -7,8 +7,7 @@
 
 import axios from 'axios';
 import type { StudioSignal } from '../../components/studio/types';
-
-const API_BASE_URL = 'http://localhost:5000/api/v1';
+import { API_BASE_URL } from './client';
 
 /**
  * Educational Note: A message in the conversation.

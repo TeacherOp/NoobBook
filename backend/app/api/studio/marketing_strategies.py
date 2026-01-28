@@ -16,13 +16,12 @@ Routes:
 - GET  /projects/<id>/studio/marketing-strategies/<id>/download  - Download file (md)
 - DELETE /projects/<id>/studio/marketing-strategies/<id>     - Delete marketing strategy
 """
-import os
-from pathlib import Path
+import io
 from flask import jsonify, request, current_app, send_file
 
 from app.api.studio import studio_bp
 from app.services.studio_services import studio_index_service
-from app.utils.path_utils import get_studio_dir
+from app.services.integrations.supabase import storage_service
 
 
 @studio_bp.route('/projects/<project_id>/studio/marketing-strategy', methods=['POST'])
@@ -183,18 +182,16 @@ def preview_marketing_strategy(project_id: str, job_id: str):
                 'error': 'Marketing strategy file not yet generated'
             }), 404
 
-        # Read markdown content
-        marketing_strategy_dir = Path(get_studio_dir(project_id)) / "marketing_strategies"
-        file_path = marketing_strategy_dir / markdown_file
+        # Read markdown content from Supabase Storage
+        markdown_content = storage_service.download_studio_file(
+            project_id, "marketing_strategies", job_id, markdown_file
+        )
 
-        if not file_path.exists():
+        if not markdown_content:
             return jsonify({
                 'success': False,
                 'error': 'Marketing strategy file not found'
             }), 404
-
-        with open(file_path, 'r', encoding='utf-8') as f:
-            markdown_content = f.read()
 
         return jsonify({
             'success': True,
@@ -241,10 +238,12 @@ def download_marketing_strategy(project_id: str, job_id: str):
                 'error': 'Marketing strategy file not yet generated'
             }), 404
 
-        marketing_strategy_dir = Path(get_studio_dir(project_id)) / "marketing_strategies"
-        file_path = marketing_strategy_dir / markdown_file
+        # Download from Supabase Storage
+        markdown_content = storage_service.download_studio_file(
+            project_id, "marketing_strategies", job_id, markdown_file
+        )
 
-        if not file_path.exists():
+        if not markdown_content:
             return jsonify({
                 'success': False,
                 'error': 'Marketing strategy file not found'
@@ -257,8 +256,9 @@ def download_marketing_strategy(project_id: str, job_id: str):
             safe_title = "Marketing_Strategy"
         download_filename = f"{safe_title}.md"
 
+        # Return as downloadable file
         return send_file(
-            file_path,
+            io.BytesIO(markdown_content.encode('utf-8')),
             mimetype='text/markdown',
             as_attachment=True,
             download_name=download_filename
@@ -289,13 +289,8 @@ def delete_marketing_strategy(project_id: str, job_id: str):
                 'error': 'Job not found'
             }), 404
 
-        # Delete markdown file if it exists
-        markdown_file = job.get('markdown_file')
-        if markdown_file:
-            marketing_strategy_dir = Path(get_studio_dir(project_id)) / "marketing_strategies"
-            file_path = marketing_strategy_dir / markdown_file
-            if file_path.exists():
-                os.remove(file_path)
+        # Delete files from Supabase Storage
+        storage_service.delete_studio_job_files(project_id, "marketing_strategies", job_id)
 
         # Delete from index
         deleted = studio_index_service.delete_marketing_strategy_job(project_id, job_id)

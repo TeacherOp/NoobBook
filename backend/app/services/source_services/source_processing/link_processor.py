@@ -10,17 +10,16 @@ The web agent:
 2. Falls back to Tavily search if web_fetch fails
 3. Returns structured content via return_search_result tool
 
-Links don't have logical page boundaries, so we store the entire content
-as a single "page" and let token-based chunking handle the splitting
-for embeddings. This creates a single page marker: === LINK PAGE 1 of 1 ===
+Storage: Processed content is stored in Supabase Storage. Chunks are also
+stored in Supabase Storage for RAG retrieval.
 """
 import json
 from pathlib import Path
 from typing import Dict, Any
 
 from app.utils.text import build_processed_output
-from app.utils.path_utils import get_processed_dir, get_chunks_dir
 from app.utils.embedding_utils import needs_embedding, count_tokens
+from app.services.integrations.supabase import storage_service
 from app.services.ai_services.embedding_service import embedding_service
 from app.services.ai_services.summary_service import summary_service
 
@@ -135,11 +134,21 @@ def process_link(
         metadata=metadata
     )
 
-    # Save processed content
-    processed_dir = get_processed_dir(project_id)
-    processed_path = processed_dir / f"{source_id}.txt"
-    with open(processed_path, "w", encoding="utf-8") as f:
-        f.write(processed_content)
+    # Upload processed content to Supabase Storage
+    storage_path = storage_service.upload_processed_file(
+        project_id=project_id,
+        source_id=source_id,
+        content=processed_content
+    )
+
+    if not storage_path:
+        source_service.update_source(
+            project_id,
+            source_id,
+            status="error",
+            processing_info={"error": "Failed to upload processed content to storage"}
+        )
+        return {"success": False, "error": "Failed to upload processed content to storage"}
 
     # Update link file to mark as fetched
     link_data["fetched"] = True
@@ -200,21 +209,23 @@ def _process_embeddings(
 
     Educational Note: We ALWAYS chunk and embed every source for consistent
     retrieval. The token count is used for chunk sizing decisions.
+    Chunks are uploaded to Supabase Storage.
     """
     try:
         # Get embedding info (always embeds, token count used for chunking)
         _, token_count, reason = needs_embedding(text=processed_text)
 
+        # Update status to "embedding" before starting
         source_service.update_source(project_id, source_id, status="embedding")
         print(f"Starting embedding for {source_name} ({reason})")
 
-        chunks_dir = get_chunks_dir(project_id)
+        # Process embeddings using the embedding service
+        # Chunks are automatically uploaded to Supabase Storage
         return embedding_service.process_embeddings(
             project_id=project_id,
             source_id=source_id,
             source_name=source_name,
-            processed_text=processed_text,
-            chunks_dir=chunks_dir
+            processed_text=processed_text
         )
 
     except Exception as e:

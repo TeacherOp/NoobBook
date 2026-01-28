@@ -16,26 +16,25 @@ Agent Pattern:
 Output Structure:
 - Markdown file with frontmatter (title, meta_description, etc.)
 - Image files for hero and section illustrations
-- All files stored in project's studio/blogs folder
+- All files stored in Supabase Storage (studio-outputs bucket)
 - ZIP download available for full package
 
 Routes:
 - POST /projects/<id>/studio/blog                        - Start generation
 - GET  /projects/<id>/studio/blog-jobs/<id>              - Job status
 - GET  /projects/<id>/studio/blog-jobs                   - List jobs
-- GET  /projects/<id>/studio/blogs/<file>                - Serve file
+- GET  /projects/<id>/studio/blogs/<job_id>/<file>       - Serve file (from Supabase)
 - GET  /projects/<id>/studio/blogs/<id>/preview          - Preview markdown
 - GET  /projects/<id>/studio/blogs/<id>/download         - Download ZIP
 - DELETE /projects/<id>/studio/blog-jobs/<id>            - Delete job
 """
 import io
 import zipfile
-from pathlib import Path
 from flask import jsonify, request, current_app, send_file, Response
 from app.api.studio import studio_bp
 from app.services.studio_services import studio_index_service
 from app.services.tool_executors.blog_agent_executor import blog_agent_executor
-from app.utils.path_utils import get_studio_dir
+from app.services.integrations.supabase import storage_service
 
 
 @studio_bp.route('/projects/<project_id>/studio/blog', methods=['POST'])
@@ -161,48 +160,61 @@ def list_blog_jobs(project_id: str):
         }), 500
 
 
-@studio_bp.route('/projects/<project_id>/studio/blogs/<filename>', methods=['GET'])
-def get_blog_file(project_id: str, filename: str):
+@studio_bp.route('/projects/<project_id>/studio/blogs/<job_id>/<filename>', methods=['GET'])
+def get_blog_file(project_id: str, job_id: str, filename: str):
     """
-    Serve a blog file (markdown or image).
+    Serve a blog file (markdown or image) from Supabase Storage.
 
     Response:
         - Markdown file or image file with appropriate headers
     """
     try:
-        blog_dir = get_studio_dir(project_id) / "blogs"
-        filepath = blog_dir / filename
-
-        if not filepath.exists():
-            return jsonify({
-                'success': False,
-                'error': f'File not found: {filename}'
-            }), 404
-
-        # Validate the file is within the expected directory (security)
-        try:
-            filepath.resolve().relative_to(blog_dir.resolve())
-        except ValueError:
-            return jsonify({
-                'success': False,
-                'error': 'Invalid file path'
-            }), 400
-
         # Determine mimetype
         if filename.endswith('.md'):
             mimetype = 'text/markdown'
-        elif filename.endswith('.png'):
-            mimetype = 'image/png'
-        elif filename.endswith('.jpg') or filename.endswith('.jpeg'):
-            mimetype = 'image/jpeg'
+            # Text file - use download_studio_file
+            content = storage_service.download_studio_file(
+                project_id=project_id,
+                job_type="blogs",
+                job_id=job_id,
+                filename=filename
+            )
+            if content is None:
+                return jsonify({
+                    'success': False,
+                    'error': f'File not found: {filename}'
+                }), 404
+            return Response(
+                content,
+                mimetype=mimetype,
+                headers={'Content-Type': f'{mimetype}; charset=utf-8'}
+            )
         else:
-            mimetype = 'application/octet-stream'
+            # Binary file (image)
+            if filename.endswith('.png'):
+                mimetype = 'image/png'
+            elif filename.endswith('.jpg') or filename.endswith('.jpeg'):
+                mimetype = 'image/jpeg'
+            else:
+                mimetype = 'application/octet-stream'
 
-        return send_file(
-            filepath,
-            mimetype=mimetype,
-            as_attachment=False
-        )
+            file_data = storage_service.download_studio_binary(
+                project_id=project_id,
+                job_type="blogs",
+                job_id=job_id,
+                filename=filename
+            )
+            if file_data is None:
+                return jsonify({
+                    'success': False,
+                    'error': f'File not found: {filename}'
+                }), 404
+
+            return send_file(
+                io.BytesIO(file_data),
+                mimetype=mimetype,
+                as_attachment=False
+            )
 
     except Exception as e:
         current_app.logger.error(f"Error serving blog file: {e}")
@@ -215,7 +227,7 @@ def get_blog_file(project_id: str, filename: str):
 @studio_bp.route('/projects/<project_id>/studio/blogs/<job_id>/preview', methods=['GET'])
 def preview_blog_post(project_id: str, job_id: str):
     """
-    Serve blog post markdown for preview.
+    Serve blog post markdown for preview from Supabase Storage.
 
     Response:
         - Markdown file content
@@ -237,18 +249,19 @@ def preview_blog_post(project_id: str, job_id: str):
                 'error': 'Blog post not yet generated'
             }), 404
 
-        blog_dir = get_studio_dir(project_id) / "blogs"
-        filepath = blog_dir / markdown_file
+        # Fetch from Supabase Storage
+        content = storage_service.download_studio_file(
+            project_id=project_id,
+            job_type="blogs",
+            job_id=job_id,
+            filename=markdown_file
+        )
 
-        if not filepath.exists():
+        if content is None:
             return jsonify({
                 'success': False,
                 'error': f'Markdown file not found: {markdown_file}'
             }), 404
-
-        # Read and return markdown content
-        with open(filepath, 'r', encoding='utf-8') as f:
-            content = f.read()
 
         return Response(
             content,
@@ -267,7 +280,7 @@ def preview_blog_post(project_id: str, job_id: str):
 @studio_bp.route('/projects/<project_id>/studio/blogs/<job_id>/download', methods=['GET'])
 def download_blog_post(project_id: str, job_id: str):
     """
-    Download blog post as ZIP file (markdown + images).
+    Download blog post as ZIP file (markdown + images) from Supabase Storage.
 
     Response:
         - ZIP file containing markdown and all images
@@ -289,24 +302,32 @@ def download_blog_post(project_id: str, job_id: str):
                 'error': 'Blog post not yet generated'
             }), 404
 
-        blog_dir = get_studio_dir(project_id) / "blogs"
-
         # Create ZIP in memory
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            # Add markdown file
-            markdown_path = blog_dir / markdown_file
-            if markdown_path.exists():
-                zip_file.write(markdown_path, markdown_file)
+            # Add markdown file from Supabase
+            markdown_content = storage_service.download_studio_file(
+                project_id=project_id,
+                job_type="blogs",
+                job_id=job_id,
+                filename=markdown_file
+            )
+            if markdown_content:
+                zip_file.writestr(markdown_file, markdown_content)
 
-            # Add image files
+            # Add image files from Supabase
             images = job.get('images', [])
             for image_info in images:
                 image_filename = image_info.get('filename')
                 if image_filename:
-                    image_path = blog_dir / image_filename
-                    if image_path.exists():
-                        zip_file.write(image_path, f"images/{image_filename}")
+                    image_data = storage_service.download_studio_binary(
+                        project_id=project_id,
+                        job_type="blogs",
+                        job_id=job_id,
+                        filename=image_filename
+                    )
+                    if image_data:
+                        zip_file.writestr(f"images/{image_filename}", image_data)
 
         zip_buffer.seek(0)
 
@@ -333,7 +354,7 @@ def download_blog_post(project_id: str, job_id: str):
 @studio_bp.route('/projects/<project_id>/studio/blog-jobs/<job_id>', methods=['DELETE'])
 def delete_blog_job(project_id: str, job_id: str):
     """
-    Delete a blog post job and its files.
+    Delete a blog post job and its files from Supabase Storage.
 
     Response:
         - Success status
@@ -348,24 +369,12 @@ def delete_blog_job(project_id: str, job_id: str):
                 'error': f'Blog job {job_id} not found'
             }), 404
 
-        # Delete files
-        blog_dir = get_studio_dir(project_id) / "blogs"
-
-        # Delete markdown file
-        markdown_file = job.get('markdown_file')
-        if markdown_file:
-            markdown_path = blog_dir / markdown_file
-            if markdown_path.exists():
-                markdown_path.unlink()
-
-        # Delete image files
-        images = job.get('images', [])
-        for image_info in images:
-            image_filename = image_info.get('filename')
-            if image_filename:
-                image_path = blog_dir / image_filename
-                if image_path.exists():
-                    image_path.unlink()
+        # Delete all files for this job from Supabase Storage
+        storage_service.delete_studio_job_files(
+            project_id=project_id,
+            job_type="blogs",
+            job_id=job_id
+        )
 
         # Delete job from index
         studio_index_service.delete_blog_job(project_id, job_id)

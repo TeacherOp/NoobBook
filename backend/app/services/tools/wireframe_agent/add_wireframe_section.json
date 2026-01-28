@@ -1,0 +1,98 @@
+{
+    "name": "add_wireframe_section",
+    "description": "Add wireframe elements for a specific section. Call this for EACH section defined in plan_wireframe. Generate all elements needed for that section.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "section_name": {
+                "type": "string",
+                "description": "Name of the section being generated (must match a section from plan_wireframe)"
+            },
+            "elements": {
+                "type": "array",
+                "description": "Array of Excalidraw elements for this section",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": [
+                                "rectangle",
+                                "text",
+                                "line",
+                                "arrow",
+                                "ellipse",
+                                "diamond"
+                            ],
+                            "description": "Element type. Use rectangle for containers/buttons/cards/images, text for labels, line for separators, arrow for flows, ellipse for avatars/icons, diamond for decision points."
+                        },
+                        "x": {
+                            "type": "number",
+                            "description": "X position from left edge"
+                        },
+                        "y": {
+                            "type": "number",
+                            "description": "Y position from top edge"
+                        },
+                        "width": {
+                            "type": "number",
+                            "description": "Width in pixels (for rectangle, ellipse, diamond)"
+                        },
+                        "height": {
+                            "type": "number",
+                            "description": "Height in pixels (for rectangle, ellipse, diamond)"
+                        },
+                        "text": {
+                            "type": "string",
+                            "description": "Text content (for text elements, or label inside shapes)"
+                        },
+                        "fontSize": {
+                            "type": "number",
+                            "description": "Font size for text. Use 28 for headings, 20 for subheadings, 16 for body, 12 for small text."
+                        },
+                        "strokeColor": {
+                            "type": "string",
+                            "description": "Border/stroke color. Use #000000 for dark, #666666 for medium, #aaaaaa for light."
+                        },
+                        "backgroundColor": {
+                            "type": "string",
+                            "description": "Fill color. Use 'transparent' for no fill, #f5f5f5 for light gray, #e0e0e0 for medium gray, #333333 for dark."
+                        },
+                        "fillStyle": {
+                            "type": "string",
+                            "enum": [
+                                "solid",
+                                "hachure",
+                                "cross-hatch"
+                            ],
+                            "description": "Fill pattern. Use 'hachure' for sketchy look (default), 'solid' for buttons/important elements, 'cross-hatch' for image placeholders."
+                        },
+                        "points": {
+                            "type": "array",
+                            "description": "For line/arrow: array of [x,y] points relative to element position.",
+                            "items": {
+                                "type": "array",
+                                "items": {
+                                    "type": "number"
+                                }
+                            }
+                        },
+                        "label": {
+                            "type": "string",
+                            "description": "Optional label to display inside/near the element"
+                        }
+                    },
+                    "required": [
+                        "type",
+                        "x",
+                        "y"
+                    ]
+                }
+            }
+        },
+        "required": [
+            "section_name",
+            "elements"
+        ]
+    }
+}

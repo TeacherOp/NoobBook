@@ -2,17 +2,14 @@
 Cost Tracking Utility - Track and calculate API costs per project.
 
 Educational Note: This utility tracks Claude API usage costs by model.
-Costs are stored cumulatively in project.json and updated after each API call.
+Costs are stored in Supabase projects table and updated after each API call.
 
 Pricing (per 1M tokens):
 - Sonnet: $3 input, $15 output
 - Haiku: $1 input, $5 output
 """
-import json
 from typing import Dict, Any, Optional
 from threading import Lock
-
-from config import Config
 
 
 # Pricing per 1M tokens
@@ -21,7 +18,7 @@ PRICING = {
     "haiku": {"input": 1.0, "output": 5.0},
 }
 
-# Lock for thread-safe file operations
+# Lock for thread-safe operations
 _lock = Lock()
 
 
@@ -63,55 +60,79 @@ def _calculate_cost(model_key: str, input_tokens: int, output_tokens: int) -> fl
     return input_cost + output_cost
 
 
-def _load_project(project_id: str) -> Optional[Dict[str, Any]]:
-    """Load project data from JSON file."""
-    project_file = Config.PROJECTS_DIR / f"{project_id}.json"
-    if not project_file.exists():
+def _get_project_service():
+    """Get project service (lazy import to avoid circular imports)."""
+    from app.services.data_services import project_service
+    return project_service
+
+
+def _load_costs(project_id: str) -> Optional[Dict[str, Any]]:
+    """Load cost tracking data from Supabase."""
+    try:
+        return _get_project_service().get_project_costs(project_id)
+    except Exception as e:
+        print(f"Cost tracking: Error loading costs for {project_id}: {e}")
         return None
 
+
+def _save_costs(project_id: str, costs: Dict[str, Any]) -> bool:
+    """Save cost tracking data to Supabase."""
     try:
-        with open(project_file, 'r') as f:
-            return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        return None
-
-
-def _save_project(project_id: str, project_data: Dict[str, Any]) -> bool:
-    """Save project data to JSON file."""
-    project_file = Config.PROJECTS_DIR / f"{project_id}.json"
-
-    try:
-        with open(project_file, 'w') as f:
-            json.dump(project_data, f, indent=2)
-        return True
-    except IOError:
+        return _get_project_service().update_project_costs(project_id, costs)
+    except Exception as e:
+        print(f"Cost tracking: Error saving costs for {project_id}: {e}")
         return False
 
 
-def _ensure_cost_tracking_structure(project_data: Dict[str, Any]) -> Dict[str, Any]:
+def _get_default_costs() -> Dict[str, Any]:
     """
-    Ensure project data has cost_tracking structure.
+    Get default cost tracking structure.
+
+    Educational Note: Returns the initial cost tracking structure
+    for projects that don't have costs yet.
+    """
+    return {
+        "total_cost": 0.0,
+        "by_model": {
+            "sonnet": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost": 0.0
+            },
+            "haiku": {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost": 0.0
+            }
+        }
+    }
+
+
+def _ensure_cost_structure(costs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Ensure costs dict has proper structure.
 
     Educational Note: Initializes the cost tracking structure if it
     doesn't exist, preserving any existing data.
     """
-    if "cost_tracking" not in project_data:
-        project_data["cost_tracking"] = {
-            "total_cost": 0.0,
-            "by_model": {
-                "sonnet": {
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "cost": 0.0
-                },
-                "haiku": {
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                    "cost": 0.0
-                }
+    if costs is None:
+        return _get_default_costs()
+
+    # Ensure all required fields exist
+    if "total_cost" not in costs:
+        costs["total_cost"] = 0.0
+    if "by_model" not in costs:
+        costs["by_model"] = {}
+
+    for model in ["sonnet", "haiku"]:
+        if model not in costs["by_model"]:
+            costs["by_model"][model] = {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost": 0.0
             }
-        }
-    return project_data
+
+    return costs
 
 
 def add_usage(
@@ -124,7 +145,7 @@ def add_usage(
     Add API usage to project cost tracking.
 
     Educational Note: This function is called after each Claude API call
-    to update the cumulative cost tracking in the project file.
+    to update the cumulative cost tracking in Supabase.
 
     Args:
         project_id: The project UUID
@@ -136,32 +157,33 @@ def add_usage(
         Updated cost tracking data or None if failed
     """
     with _lock:
-        project_data = _load_project(project_id)
-        if project_data is None:
-            print(f"Cost tracking: Project {project_id} not found")
-            return None
+        # Load current costs from Supabase
+        costs = _load_costs(project_id)
+        if costs is None:
+            # Project might not exist or no costs yet - use defaults
+            costs = _get_default_costs()
 
         # Ensure structure exists
-        project_data = _ensure_cost_tracking_structure(project_data)
+        costs = _ensure_cost_structure(costs)
 
         # Get model key and calculate cost
         model_key = _get_model_key(model)
         call_cost = _calculate_cost(model_key, input_tokens, output_tokens)
 
         # Update model-specific tracking
-        model_tracking = project_data["cost_tracking"]["by_model"][model_key]
+        model_tracking = costs["by_model"][model_key]
         model_tracking["input_tokens"] += input_tokens
         model_tracking["output_tokens"] += output_tokens
         model_tracking["cost"] += call_cost
 
         # Update total cost
-        project_data["cost_tracking"]["total_cost"] += call_cost
+        costs["total_cost"] += call_cost
 
-        # Save updated project
-        if _save_project(project_id, project_data):
-            return project_data["cost_tracking"]
+        # Save updated costs to Supabase
+        if _save_costs(project_id, costs):
+            return costs
         else:
-            print(f"Cost tracking: Failed to save project {project_id}")
+            print(f"Cost tracking: Failed to save costs for project {project_id}")
             return None
 
 
@@ -173,13 +195,11 @@ def get_project_costs(project_id: str) -> Optional[Dict[str, Any]]:
         project_id: The project UUID
 
     Returns:
-        Cost tracking data or None if not found
+        Cost tracking data or default structure if not found
     """
-    project_data = _load_project(project_id)
-    if project_data is None:
-        return None
+    costs = _load_costs(project_id)
 
     # Ensure structure exists (for projects created before cost tracking)
-    project_data = _ensure_cost_tracking_structure(project_data)
+    costs = _ensure_cost_structure(costs)
 
-    return project_data.get("cost_tracking")
+    return costs

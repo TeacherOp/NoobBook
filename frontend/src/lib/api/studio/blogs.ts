@@ -201,9 +201,10 @@ export const blogsAPI = {
 
   /**
    * Get the full URL for a blog file (markdown or image)
+   * Routes through backend API which fetches from Supabase Storage
    */
-  getFileUrl(projectId: string, filename: string): string {
-    return `${API_BASE_URL}/projects/${projectId}/studio/blogs/${filename}`;
+  getFileUrl(projectId: string, jobId: string, filename: string): string {
+    return `${API_BASE_URL}/projects/${projectId}/studio/blogs/${jobId}/${filename}`;
   },
 
   /**

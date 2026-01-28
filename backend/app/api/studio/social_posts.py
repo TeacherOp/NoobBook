@@ -16,20 +16,23 @@ Multi-Modal Pipeline:
 2. Generate copy for each platform
 3. Create visual descriptions for images
 4. Generate images with Gemini Imagen
-5. Package results with URLs
+5. Upload to Supabase Storage
+6. Return public URLs
 
 Routes:
-- POST /projects/<id>/studio/social-posts           - Start generation
-- GET  /projects/<id>/studio/social-post-jobs/<id>  - Job status
-- GET  /projects/<id>/studio/social-post-jobs       - List jobs
-- GET  /projects/<id>/studio/social/<file>          - Serve image file
+- POST /projects/<id>/studio/social-posts                    - Start generation
+- GET  /projects/<id>/studio/social-post-jobs/<id>           - Job status
+- GET  /projects/<id>/studio/social-post-jobs                - List jobs
+- GET  /projects/<id>/studio/social/<job_id>/<file>          - Serve image file (from Supabase)
 """
+import io
 import uuid
 from flask import jsonify, request, current_app, send_file
 from app.api.studio import studio_bp
 from app.services.studio_services import studio_index_service
-from app.services.studio_services.social_posts_service import social_posts_service, get_studio_social_dir
+from app.services.studio_services.social_posts_service import social_posts_service
 from app.services.integrations.google.imagen_service import imagen_service
+from app.services.integrations.supabase import storage_service
 from app.services.background_services.task_service import task_service
 
 
@@ -161,38 +164,34 @@ def list_social_post_jobs(project_id: str):
         }), 500
 
 
-@studio_bp.route('/projects/<project_id>/studio/social/<filename>', methods=['GET'])
-def get_social_file(project_id: str, filename: str):
+@studio_bp.route('/projects/<project_id>/studio/social/<job_id>/<filename>', methods=['GET'])
+def get_social_file(project_id: str, job_id: str, filename: str):
     """
-    Serve a social post image file.
+    Serve a social post image file from Supabase Storage.
 
     Response:
         - Image file (png/jpg) with appropriate headers
     """
     try:
-        social_dir = get_studio_social_dir(project_id)
-        filepath = social_dir / filename
+        # Fetch from Supabase Storage
+        file_data = storage_service.download_studio_binary(
+            project_id=project_id,
+            job_type="social_posts",
+            job_id=job_id,
+            filename=filename
+        )
 
-        if not filepath.exists():
+        if file_data is None:
             return jsonify({
                 'success': False,
                 'error': f'Social image not found: {filename}'
             }), 404
 
-        # Validate the file is within the expected directory (security)
-        try:
-            filepath.resolve().relative_to(social_dir.resolve())
-        except ValueError:
-            return jsonify({
-                'success': False,
-                'error': 'Invalid file path'
-            }), 400
-
         # Determine mimetype
         mimetype = 'image/png' if filename.endswith('.png') else 'image/jpeg'
 
         return send_file(
-            filepath,
+            io.BytesIO(file_data),
             mimetype=mimetype,
             as_attachment=False
         )

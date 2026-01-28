@@ -9,17 +9,18 @@ Platforms:
 - LinkedIn: 16:9 (professional, landscape)
 - Instagram/Facebook: 1:1 (square, engaging)
 - Twitter/X: 16:9 (landscape, casual)
+
+All images are stored in Supabase Storage.
 """
 import json
-from pathlib import Path
 from typing import Dict, Any, List
 from datetime import datetime
 
 from app.services.integrations.claude import claude_service
 from app.services.integrations.google.imagen_service import imagen_service
+from app.services.integrations.supabase import storage_service
 from app.services.studio_services import studio_index_service
 from app.config import prompt_loader
-from app.utils.path_utils import get_studio_dir
 
 
 # Platform to Gemini aspect ratio mapping
@@ -28,14 +29,6 @@ PLATFORM_ASPECT_RATIOS = {
     "instagram": "1:1",      # Square for feed posts
     "twitter": "16:9",       # Landscape for engagement
 }
-
-
-def get_studio_social_dir(project_id: str) -> Path:
-    """Get the directory for social post images."""
-    studio_dir = get_studio_dir(project_id)
-    social_dir = studio_dir / "social"
-    social_dir.mkdir(parents=True, exist_ok=True)
-    return social_dir
 
 
 class SocialPostsService:
@@ -121,9 +114,7 @@ class SocialPostsService:
             progress="Generating images..."
         )
 
-        # Step 2: Generate images for each platform
-        social_dir = get_studio_social_dir(project_id)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        # Step 2: Generate images for each platform and upload to Supabase
         all_posts = []
 
         for i, post_data in enumerate(posts_data):
@@ -142,15 +133,6 @@ class SocialPostsService:
                 progress=f"Generating {platform} image ({i+1}/{len(posts_data)})..."
             )
 
-            # Generate single image for this platform
-            result = imagen_service.generate_images(
-                prompt=image_prompt,
-                output_dir=social_dir,
-                num_images=1,
-                filename_prefix=f"social_{job_id[:8]}_{platform}_{timestamp}",
-                aspect_ratio=aspect_ratio
-            )
-
             post_info = {
                 "platform": platform,
                 "copy": post_data.get("copy", ""),
@@ -158,13 +140,44 @@ class SocialPostsService:
                 "aspect_ratio": post_data.get("aspect_ratio", aspect_ratio),
                 "image_prompt": image_prompt,
                 "image": None,
-                "image_url": None
+                "image_url": None,
+                "storage_path": None
             }
 
-            if result.get("success") and result.get("images"):
-                image_info = result["images"][0]
-                post_info["image"] = image_info
-                post_info["image_url"] = f"/api/v1/projects/{project_id}/studio/social/{image_info['filename']}"
+            # Generate image and get bytes (not saved to disk)
+            result = imagen_service.generate_image_bytes(
+                prompt=image_prompt,
+                filename_prefix=f"social_{job_id[:8]}_{platform}",
+                aspect_ratio=aspect_ratio
+            )
+
+            if result.get("success"):
+                filename = result["filename"]
+                image_bytes = result["image_bytes"]
+                content_type = result["content_type"]
+
+                # Upload to Supabase Storage
+                storage_path = storage_service.upload_studio_binary(
+                    project_id=project_id,
+                    job_type="social_posts",
+                    job_id=job_id,
+                    filename=filename,
+                    file_data=image_bytes,
+                    content_type=content_type
+                )
+
+                if storage_path:
+                    # Get public URL
+                    public_url = storage_service.get_studio_public_url(
+                        project_id=project_id,
+                        job_type="social_posts",
+                        job_id=job_id,
+                        filename=filename
+                    )
+                    post_info["image"] = {"filename": filename}
+                    post_info["image_url"] = public_url
+                    post_info["storage_path"] = storage_path
+                    print(f"    Uploaded: {filename}")
 
             all_posts.append(post_info)
 

@@ -66,7 +66,7 @@ def start_backend():
 
   print_status(f"\n{Colors.BOLD}Starting Backend (Flask)...{Colors.RESET}", Colors.BLUE)
   print_status(f"Directory: {backend_dir}", Colors.BLUE)
-  print_status(f"URL: http://localhost:5000", Colors.BLUE)
+  print_status(f"URL: http://localhost:5001", Colors.BLUE)
 
   # Start backend process
   process = subprocess.Popen(
@@ -140,7 +140,7 @@ def main():
     print_status(f"\n{'='*60}", Colors.BOLD)
     print_status("Services Started Successfully!", Colors.GREEN)
     print_status(f"{'='*60}", Colors.BOLD)
-    print_status("\nBackend:  http://localhost:5000", Colors.BLUE)
+    print_status("\nBackend:  http://localhost:5001", Colors.BLUE)
     print_status("Frontend: http://localhost:5173", Colors.GREEN)
     print_status(f"\n{Colors.YELLOW}Press Ctrl+C to stop all services{Colors.RESET}\n")
 

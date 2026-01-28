@@ -17,9 +17,9 @@ from datetime import datetime
 from app.services.integrations.claude import claude_service
 from app.services.source_services import source_index_service
 from app.services.studio_services import studio_index_service
+from app.services.integrations.supabase import storage_service
 from app.config import prompt_loader, tool_loader
 from app.utils import claude_parsing_utils
-from app.utils.path_utils import get_chunks_dir, get_processed_dir
 
 
 class QuizService:
@@ -58,32 +58,32 @@ class QuizService:
 
         Educational Note: For large sources, we sample chunks evenly
         to stay within token limits while covering the full content.
+        Content is downloaded from Supabase Storage.
         """
         # Get source metadata
         source = source_index_service.get_source_from_index(project_id, source_id)
         if not source:
             return ""
 
-        token_count = source.get("token_count", 0)
+        # Token count is stored in embedding_info
+        embedding_info = source.get("embedding_info", {}) or {}
+        token_count = embedding_info.get("token_count", 0) or 0
 
-        # For small sources, read the processed file directly
+        # For small sources, read the processed file from Supabase Storage
         if token_count < max_tokens:
-            processed_dir = get_processed_dir(project_id)
-            processed_file = processed_dir / f"{source_id}.txt"
-            if processed_file.exists():
-                return processed_file.read_text(encoding='utf-8')
+            processed_content = storage_service.download_processed_file(
+                project_id, source_id
+            )
+            if processed_content:
+                return processed_content
 
-        # For large sources, sample chunks evenly
-        chunks_dir = get_chunks_dir(project_id, source_id)
-        if not chunks_dir.exists():
-            return ""
-
-        chunk_files = sorted(chunks_dir.glob("*.txt"))
-        if not chunk_files:
+        # For large sources, get chunks from Supabase Storage
+        chunks = storage_service.list_source_chunks(project_id, source_id)
+        if not chunks:
             return ""
 
         # Sample evenly across chunks
-        total_chunks = len(chunk_files)
+        total_chunks = len(chunks)
         sample_count = min(20, total_chunks)  # Max 20 chunks
         step = max(1, total_chunks // sample_count)
 
@@ -91,11 +91,8 @@ class QuizService:
         for i in range(0, total_chunks, step):
             if len(content_parts) >= sample_count:
                 break
-            chunk_content = chunk_files[i].read_text(encoding='utf-8')
-            # Skip the metadata header (lines starting with #)
-            lines = chunk_content.split('\n')
-            content_lines = [l for l in lines if not l.startswith('#')]
-            content_parts.append('\n'.join(content_lines).strip())
+            chunk_text = chunks[i].get("text", "")
+            content_parts.append(chunk_text.strip())
 
         return '\n\n---\n\n'.join(content_parts)
 

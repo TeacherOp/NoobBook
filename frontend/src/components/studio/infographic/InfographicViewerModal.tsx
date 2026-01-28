@@ -15,6 +15,7 @@ import {
 import { Button } from '../../ui/button';
 import { ChartPieSlice, DownloadSimple } from '@phosphor-icons/react';
 import type { InfographicJob } from '@/lib/api/studio';
+import { API_HOST } from '@/lib/api/client';
 
 interface InfographicViewerModalProps {
   viewingInfographicJob: InfographicJob | null;
@@ -45,7 +46,7 @@ export const InfographicViewerModal: React.FC<InfographicViewerModalProps> = ({
           <div className="py-4">
             <div className="relative group rounded-lg overflow-hidden border bg-muted">
               <img
-                src={`http://localhost:5000${viewingInfographicJob.image_url}`}
+                src={`${API_HOST}${viewingInfographicJob.image_url}`}
                 alt={viewingInfographicJob.topic_title || 'Infographic'}
                 className="w-full h-auto object-contain"
               />
@@ -57,7 +58,7 @@ export const InfographicViewerModal: React.FC<InfographicViewerModalProps> = ({
                   onClick={() => {
                     if (viewingInfographicJob?.image?.filename) {
                       const link = document.createElement('a');
-                      link.href = `http://localhost:5000${viewingInfographicJob.image_url}`;
+                      link.href = `${API_HOST}${viewingInfographicJob.image_url}`;
                       link.download = viewingInfographicJob.image.filename;
                       link.click();
                     }

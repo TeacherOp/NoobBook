@@ -179,22 +179,38 @@ sudo apt install libreoffice ffmpeg
 npx playwright install
 ```
 
-### Backend
+### macOS / Linux
 
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # or venv\Scripts\activate on Windows
-pip install -r requirements.txt
-python run.py             # http://localhost:5000
+# First time setup (creates venv, installs dependencies)
+bin/setup
+
+# Run both backend and frontend
+bin/dev
+
+# Options
+bin/dev --backend-only    # Only Flask server
+bin/dev --frontend-only   # Only Vite server
+bin/dev --install         # Update deps before starting
 ```
 
-### Frontend
+### Windows
 
 ```bash
-cd frontend
+# First time setup
+cd backend
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+
+cd ../frontend
 npm install
-npm run dev               # http://localhost:5173
+
+# Run both servers
+python start.py
+
+# Stop servers
+python stop.py
 ```
 
 ### API Keys

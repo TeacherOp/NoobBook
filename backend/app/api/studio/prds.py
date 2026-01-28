@@ -16,13 +16,12 @@ Routes:
 - GET  /projects/<id>/studio/prds/<id>/download     - Download file (md)
 - DELETE /projects/<id>/studio/prds/<id>            - Delete PRD
 """
-import os
-from pathlib import Path
-from flask import jsonify, request, current_app, send_file
+import io
+from flask import jsonify, request, current_app, send_file, Response
 
 from app.api.studio import studio_bp
 from app.services.studio_services import studio_index_service
-from app.utils.path_utils import get_studio_dir
+from app.services.integrations.supabase import storage_service
 
 
 @studio_bp.route('/projects/<project_id>/studio/prd', methods=['POST'])
@@ -183,18 +182,16 @@ def preview_prd(project_id: str, job_id: str):
                 'error': 'PRD file not yet generated'
             }), 404
 
-        # Read markdown content
-        prd_dir = Path(get_studio_dir(project_id)) / "prds"
-        file_path = prd_dir / markdown_file
+        # Read markdown content from Supabase Storage
+        markdown_content = storage_service.download_studio_file(
+            project_id, "prds", job_id, markdown_file
+        )
 
-        if not file_path.exists():
+        if not markdown_content:
             return jsonify({
                 'success': False,
                 'error': 'PRD file not found'
             }), 404
-
-        with open(file_path, 'r', encoding='utf-8') as f:
-            markdown_content = f.read()
 
         return jsonify({
             'success': True,
@@ -241,10 +238,12 @@ def download_prd(project_id: str, job_id: str):
                 'error': 'PRD file not yet generated'
             }), 404
 
-        prd_dir = Path(get_studio_dir(project_id)) / "prds"
-        file_path = prd_dir / markdown_file
+        # Download from Supabase Storage
+        markdown_content = storage_service.download_studio_file(
+            project_id, "prds", job_id, markdown_file
+        )
 
-        if not file_path.exists():
+        if not markdown_content:
             return jsonify({
                 'success': False,
                 'error': 'PRD file not found'
@@ -257,8 +256,9 @@ def download_prd(project_id: str, job_id: str):
             safe_title = "PRD"
         download_filename = f"{safe_title}.md"
 
+        # Return as downloadable file
         return send_file(
-            file_path,
+            io.BytesIO(markdown_content.encode('utf-8')),
             mimetype='text/markdown',
             as_attachment=True,
             download_name=download_filename
@@ -289,13 +289,8 @@ def delete_prd(project_id: str, job_id: str):
                 'error': 'Job not found'
             }), 404
 
-        # Delete markdown file if it exists
-        markdown_file = job.get('markdown_file')
-        if markdown_file:
-            prd_dir = Path(get_studio_dir(project_id)) / "prds"
-            file_path = prd_dir / markdown_file
-            if file_path.exists():
-                os.remove(file_path)
+        # Delete files from Supabase Storage
+        storage_service.delete_studio_job_files(project_id, "prds", job_id)
 
         # Delete from index
         deleted = studio_index_service.delete_prd_job(project_id, job_id)

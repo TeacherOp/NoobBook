@@ -1,0 +1,85 @@
+{
+    "name": "finalize_wireframe",
+    "description": "Complete the wireframe generation. Call this AFTER all sections have been added. You can optionally add any final connecting elements or annotations.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {
+                "type": "string",
+                "description": "Final summary describing the complete wireframe"
+            },
+            "canvas_width": {
+                "type": "number",
+                "description": "Final canvas width (if different from plan)"
+            },
+            "canvas_height": {
+                "type": "number",
+                "description": "Final canvas height (adjust based on total content height)"
+            },
+            "final_elements": {
+                "type": "array",
+                "description": "Optional final elements to add (annotations, connecting lines, etc.)",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "type": {
+                            "type": "string",
+                            "enum": [
+                                "rectangle",
+                                "text",
+                                "line",
+                                "arrow",
+                                "ellipse",
+                                "diamond"
+                            ]
+                        },
+                        "x": {
+                            "type": "number"
+                        },
+                        "y": {
+                            "type": "number"
+                        },
+                        "width": {
+                            "type": "number"
+                        },
+                        "height": {
+                            "type": "number"
+                        },
+                        "text": {
+                            "type": "string"
+                        },
+                        "fontSize": {
+                            "type": "number"
+                        },
+                        "strokeColor": {
+                            "type": "string"
+                        },
+                        "backgroundColor": {
+                            "type": "string"
+                        },
+                        "fillStyle": {
+                            "type": "string"
+                        },
+                        "points": {
+                            "type": "array",
+                            "items": {
+                                "type": "array",
+                                "items": {
+                                    "type": "number"
+                                }
+                            }
+                        }
+                    },
+                    "required": [
+                        "type",
+                        "x",
+                        "y"
+                    ]
+                }
+            }
+        },
+        "required": [
+            "summary"
+        ]
+    }
+}

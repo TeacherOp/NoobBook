@@ -1,0 +1,59 @@
+{
+    "name": "plan_wireframe",
+    "description": "Plan the wireframe structure by defining sections. Call this FIRST to establish the layout plan before generating elements. Each section will be generated separately to ensure complete coverage.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {
+                "type": "string",
+                "description": "Title for this wireframe (e.g., 'Homepage Layout', 'Dashboard View')"
+            },
+            "description": {
+                "type": "string",
+                "description": "Brief description of what this wireframe represents"
+            },
+            "canvas_width": {
+                "type": "number",
+                "description": "Canvas width in pixels. Default 1200 for desktop, 400 for mobile."
+            },
+            "canvas_height": {
+                "type": "number",
+                "description": "Canvas height in pixels. Default 800, increase for longer pages."
+            },
+            "sections": {
+                "type": "array",
+                "description": "List of sections to create. Each section will be generated in a separate step.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Section name (e.g., 'Header', 'Hero', 'Features', 'Footer')"
+                        },
+                        "y_start": {
+                            "type": "number",
+                            "description": "Starting Y position for this section"
+                        },
+                        "y_end": {
+                            "type": "number",
+                            "description": "Ending Y position for this section"
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Optional: What this section contains"
+                        }
+                    },
+                    "required": [
+                        "name",
+                        "y_start",
+                        "y_end"
+                    ]
+                }
+            }
+        },
+        "required": [
+            "title",
+            "sections"
+        ]
+    }
+}

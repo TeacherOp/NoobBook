@@ -6,6 +6,7 @@
 
 import { useState, useRef } from 'react';
 import { audioAPI, type AudioJob } from '@/lib/api/studio';
+import { API_HOST } from '@/lib/api/client';
 import type { StudioSignal } from '../types';
 import { useToast } from '../../ui/toast';
 
@@ -27,8 +28,11 @@ export const useAudioGeneration = (projectId: string) => {
   };
 
   const handleAudioGeneration = async (signal: StudioSignal) => {
+    console.log('[useAudioGeneration] handleAudioGeneration called with signal:', signal);
     const sourceId = signal.sources[0]?.source_id;
+    console.log('[useAudioGeneration] Extracted sourceId:', sourceId);
     if (!sourceId) {
+      console.error('[useAudioGeneration] No source_id found in signal.sources:', signal.sources);
       showError('No source specified for audio generation.');
       return;
     }
@@ -94,7 +98,7 @@ export const useAudioGeneration = (projectId: string) => {
 
     // Set the source and play
     if (audioRef.current) {
-      audioRef.current.src = `http://localhost:5000${job.audio_url}`;
+      audioRef.current.src = `${API_HOST}${job.audio_url}`;
       audioRef.current.play();
       setPlayingJobId(job.id);
     }
@@ -119,13 +123,28 @@ export const useAudioGeneration = (projectId: string) => {
 
   /**
    * Download audio file
+   * Educational Note: Cross-origin downloads require fetching as blob first.
+   * The `download` attribute on anchor tags only works for same-origin URLs.
    */
-  const downloadAudio = (job: AudioJob) => {
+  const downloadAudio = async (job: AudioJob) => {
     if (!job.audio_url) return;
-    const link = document.createElement('a');
-    link.href = `http://localhost:5000${job.audio_url}`;
-    link.download = job.audio_filename || 'audio_overview.mp3';
-    link.click();
+
+    try {
+      const response = await fetch(`${API_HOST}${job.audio_url}`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = job.audio_filename || 'audio_overview.mp3';
+      link.click();
+
+      // Clean up the object URL after download
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to download audio:', error);
+      showError('Failed to download audio file');
+    }
   };
 
   /**

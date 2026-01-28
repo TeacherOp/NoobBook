@@ -19,7 +19,6 @@ from app.services.background_services import task_service
 from app.config import tool_loader, prompt_loader, get_anthropic_config
 from app.utils import claude_parsing_utils
 from app.utils.encoding_utils import encode_file_to_base64, get_media_type
-from app.utils.path_utils import get_processed_dir
 from app.utils.rate_limit_utils import RateLimiter
 from app.utils.text import build_processed_output
 from app.utils.embedding_utils import count_tokens
@@ -129,10 +128,6 @@ class ImageService:
         """
         print(f"Starting image extraction for source: {source_id}")
 
-        # Get output path using path_utils
-        processed_dir = get_processed_dir(project_id)
-        output_path = processed_dir / f"{source_id}.txt"
-
         try:
             # Load configurations using centralized loaders
             prompt_config = prompt_loader.get_prompt_config("image_extraction")
@@ -217,16 +212,15 @@ class ImageService:
                 metadata=metadata
             )
 
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(processed_content)
-
             print(f"Image extraction complete: {image_path.name}")
 
+            # Return processed content for processor to upload to Supabase Storage
             return {
                 "success": True,
                 "status": "ready",
-                "extracted_text_path": str(output_path),
+                "processed_content": processed_content,
                 "character_count": character_count,
+                "token_count": token_count,
                 "content_type": content_type,
                 "summary": extraction.get("summary"),
                 "token_usage": response.get("usage", {}),
@@ -236,8 +230,6 @@ class ImageService:
 
         except Exception as e:
             print(f"Image extraction failed: {e}")
-            if output_path.exists():
-                output_path.unlink()
             return {
                 "success": False,
                 "status": "error",
@@ -265,10 +257,6 @@ class ImageService:
             Dict with extraction results for all images
         """
         print(f"Starting batch image extraction for {len(image_paths)} images")
-
-        # Get output path using path_utils
-        processed_dir = get_processed_dir(project_id)
-        output_path = processed_dir / f"{source_id}.txt"
 
         try:
             # Load configurations using centralized loaders
@@ -371,17 +359,16 @@ class ImageService:
                 metadata=metadata
             )
 
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(processed_content)
-
             print(f"Batch extraction complete: {len(image_paths)} images processed")
 
+            # Return processed content for processor to upload to Supabase Storage
             return {
                 "success": True,
                 "status": "ready",
-                "extracted_text_path": str(output_path),
+                "processed_content": processed_content,
                 "images_processed": len(image_paths),
                 "character_count": character_count,
+                "token_count": token_count,
                 "token_usage": {
                     "input_tokens": total_input_tokens,
                     "output_tokens": total_output_tokens
@@ -392,8 +379,6 @@ class ImageService:
 
         except Exception as e:
             print(f"Batch image extraction failed: {e}")
-            if output_path.exists():
-                output_path.unlink()
             return {
                 "success": False,
                 "status": "error",

@@ -4,36 +4,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build & Run Commands
 
-### Quick Start (Recommended)
-Start both backend and frontend with one command:
+### macOS / Linux (Recommended)
 ```bash
-python start.py
+# First time setup (creates venv, installs all dependencies)
+bin/setup
+
+# Run both backend and frontend
+bin/dev
+
+# Options
+bin/dev --backend-only    # Only Flask server (http://localhost:5001)
+bin/dev --frontend-only   # Only Vite server (http://localhost:5173)
+bin/dev --install         # Update deps before starting
 ```
 
-Stop both services:
+### Windows
 ```bash
+# First time setup
+cd backend
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+
+cd ../frontend
+npm install
+
+# Run both servers
+python start.py
+
+# Stop servers
 python stop.py
 ```
 
-These cross-platform scripts (Windows/Linux/macOS) handle both services automatically, display colored output, and manage process cleanup.
-
-### Backend (Flask)
+### Other Commands
 ```bash
-cd backend
-python -m venv venv
-source venv/bin/activate      # macOS/Linux
-# venv\Scripts\activate       # Windows
-pip install -r requirements.txt
-python run.py                  # Runs on http://localhost:5000
-```
-
-### Frontend (React + Vite)
-```bash
-cd frontend
-npm install
-npm run dev                    # Runs on http://localhost:5173
-npm run build                  # Production build
-npm run lint                   # ESLint
+npm run build                  # Production build (frontend)
+npm run lint                   # ESLint (frontend)
 ```
 
 ### System Dependencies (Required)
@@ -263,7 +269,7 @@ app/services/tools/               # Tool definitions (JSON schemas)
 ```
 
 ### API Endpoints
-Base URL: `http://localhost:5000/api/v1`
+Base URL: `http://localhost:5001/api/v1`
 
 **Projects**: GET/POST `/projects`, GET/PUT/DELETE `/projects/{id}`, GET `/projects/{id}/costs`, GET `/projects/{id}/memory`
 
@@ -302,7 +308,7 @@ Base URL: `http://localhost:5000/api/v1`
 
 Import files from Google Drive. OAuth 2.0 flow with `drive.readonly` scope. Tokens stored in `data/google_tokens.json`, auto-refresh on expiry. Google Workspace exports: Docs→DOCX, Sheets→CSV, Slides→PPTX.
 
-**Setup**: Create OAuth credentials in Google Cloud Console, add redirect URI `http://localhost:5000/api/v1/google/callback`.
+**Setup**: Create OAuth credentials in Google Cloud Console, add redirect URI `http://localhost:5001/api/v1/google/callback`.
 
 ## Voice Input (ElevenLabs)
 

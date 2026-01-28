@@ -28,8 +28,6 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
 
-from config import Config
-
 
 # Supported language codes for ElevenLabs Speech-to-Text
 # Educational Note: Pass None for auto-detection, or one of these codes to force a language
@@ -71,7 +69,6 @@ class AudioService:
 
     def __init__(self):
         """Initialize the audio service."""
-        self.projects_dir = Config.PROJECTS_DIR
         self._client = None
 
     def _get_client(self):
@@ -185,7 +182,7 @@ class AudioService:
 
             print(f"Detected language: {detected_language_name} ({detected_language_code})")
 
-            # Build and save the processed content
+            # Build the processed content
             processed_content = self._build_processed_content(
                 transcript_text=transcript_text,
                 audio_name=audio_path.name,
@@ -195,19 +192,18 @@ class AudioService:
                 diarization_enabled=diarize
             )
 
-            # Save to processed directory
-            processed_dir = self.projects_dir / project_id / "sources" / "processed"
-            processed_dir.mkdir(parents=True, exist_ok=True)
-            output_path = processed_dir / f"{source_id}.txt"
+            # Calculate token count
+            from app.utils.embedding_utils import count_tokens
+            token_count = count_tokens(processed_content)
 
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(processed_content)
+            print(f"Transcript generated: {len(transcript_text)} chars, {token_count} tokens")
 
-            print(f"Saved transcript to: {output_path}")
-
+            # Return processed content for processor to upload to Supabase Storage
             return {
                 "success": True,
+                "processed_content": processed_content,
                 "character_count": len(transcript_text),
+                "token_count": token_count,
                 "detected_language_code": detected_language_code,
                 "detected_language_name": detected_language_name,
                 "model_used": self.TRANSCRIPTION_MODEL,

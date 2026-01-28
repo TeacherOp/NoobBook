@@ -5,21 +5,16 @@ Educational Note: This executor handles the studio_signal tool when Claude
 identifies opportunities to activate studio generation options. The flow is:
 
 1. Main chat Claude calls studio_signal tool with signals array
-2. This executor validates and stores signals synchronously
+2. This executor validates and stores signals in Supabase studio_signals table
 3. Returns "signals activated" response to Claude
 
-Note: Signal storage is synchronous (not background) to avoid race conditions
-with the main chat service which reads/writes the same chat JSON file.
-
-Signals accumulate within a chat (don't reset) and are chat-scoped.
-New chats in the same project start with empty signals.
+Signals are stored in the studio_signals table and linked to the chat.
 """
-import json
 import uuid
 from datetime import datetime
 from typing import Dict, Any, List
 
-from app.utils.path_utils import get_chats_dir
+from app.services.integrations.supabase import get_supabase, is_supabase_enabled
 
 
 class StudioSignalExecutor:
@@ -140,12 +135,10 @@ class StudioSignalExecutor:
         signals: List[Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        Store signals in chat JSON.
+        Store signals in Supabase studio_signals table.
 
-        Educational Note: This runs synchronously (not background) to avoid
-        race conditions with the main chat service that reads/writes the same file.
-        It appends new signals to the chat's studio_signals array.
-        Signals accumulate - they don't replace existing ones.
+        Educational Note: Signals are stored in Supabase and linked to the chat.
+        Each signal becomes a row in the studio_signals table.
 
         Args:
             project_id: The project UUID
@@ -156,37 +149,54 @@ class StudioSignalExecutor:
             Result dict with success status
         """
         try:
-            # Get chat file path
-            chats_dir = get_chats_dir(project_id)
-            chat_file = chats_dir / f"{chat_id}.json"
-
-            if not chat_file.exists():
+            if not is_supabase_enabled():
                 return {
                     "success": False,
-                    "error": f"Chat not found: {chat_id}"
+                    "error": "Supabase not configured"
                 }
 
-            # Load chat data
-            with open(chat_file, 'r') as f:
-                chat_data = json.load(f)
+            client = get_supabase()
 
-            # Initialize studio_signals array if not exists
-            if "studio_signals" not in chat_data:
-                chat_data["studio_signals"] = []
+            # Insert each signal into studio_signals table
+            inserted_count = 0
+            for signal in signals:
+                # Extract source_ids from sources array
+                # sources is array of {source_id: "...", chunk_ids: [...]}
+                # but database expects UUID[] of just source_ids
+                sources = signal.get("sources", [])
+                source_ids = []
+                for src in sources:
+                    if isinstance(src, dict) and src.get("source_id"):
+                        source_ids.append(src["source_id"])
+                    elif isinstance(src, str):
+                        # Handle case where it's already a string
+                        source_ids.append(src)
 
-            # Append new signals (accumulate, don't replace)
-            chat_data["studio_signals"].extend(signals)
+                signal_data = {
+                    "chat_id": chat_id,
+                    "studio_item": signal.get("studio_item"),
+                    "direction": signal.get("direction", ""),
+                    "source_ids": source_ids,
+                    "status": "pending"
+                }
 
-            # Save chat data
-            with open(chat_file, 'w') as f:
-                json.dump(chat_data, f, indent=2)
+                print(f"Inserting studio signal: {signal_data}")
 
-            print(f"Stored {len(signals)} studio signals for chat {chat_id}")
+                try:
+                    response = client.table("studio_signals").insert(signal_data).execute()
+                    if response.data:
+                        inserted_count += 1
+                        print(f"Successfully inserted signal: {response.data}")
+                    else:
+                        print(f"No data returned from insert")
+                except Exception as insert_error:
+                    print(f"Error inserting signal: {insert_error}")
+
+            print(f"Stored {inserted_count} studio signals for chat {chat_id}")
 
             return {
                 "success": True,
-                "signals_stored": len(signals),
-                "total_signals": len(chat_data["studio_signals"])
+                "signals_stored": inserted_count
             }
 
         except Exception as e:

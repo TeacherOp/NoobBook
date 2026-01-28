@@ -6,13 +6,13 @@ Educational Note: PPTX files are processed in three stages:
 2. Extract PDF pages as base64 (reusing existing infrastructure)
 3. Send to Claude vision with presentation-specific prompts
 
-This creates page markers like: === PPTX PAGE 1 of 10 ===
-which the chunking service recognizes for creating embeddings.
+Storage: Processed content is stored in Supabase Storage. Chunks are also
+stored in Supabase Storage for RAG retrieval.
 """
 from pathlib import Path
 from typing import Dict, Any
 
-from app.utils.path_utils import get_processed_dir, get_chunks_dir
+from app.services.integrations.supabase import storage_service
 from app.utils.embedding_utils import needs_embedding
 from app.services.ai_services.embedding_service import embedding_service
 from app.services.ai_services.summary_service import summary_service
@@ -48,21 +48,42 @@ def process_pptx(
     )
 
     if result.get("success"):
+        # Get processed content from result
+        processed_content = result.get("processed_content", "")
+
+        # Upload processed content to Supabase Storage
+        storage_path = storage_service.upload_processed_file(
+            project_id=project_id,
+            source_id=source_id,
+            content=processed_content
+        )
+
+        if not storage_path:
+            source_service.update_source(
+                project_id,
+                source_id,
+                status="error",
+                processing_info={"error": "Failed to upload processed content to storage"}
+            )
+            return {"success": False, "error": "Failed to upload processed content to storage"}
+
         processing_info = {
             "processor": "pptx_service",
             "model_used": result.get("model_used"),
             "total_slides": result.get("total_slides"),
             "slides_processed": result.get("slides_processed"),
             "character_count": result.get("character_count"),
+            "token_count": result.get("token_count"),
             "token_usage": result.get("token_usage"),
             "extracted_at": result.get("extracted_at")
         }
 
-        # Process embeddings if needed
+        # Process embeddings
         embedding_info = _process_embeddings(
             project_id=project_id,
             source_id=source_id,
             source_name=source.get("name", ""),
+            processed_text=processed_content,
             source_service=source_service
         )
 
@@ -74,6 +95,7 @@ def process_pptx(
             project_id,
             source_id,
             status="ready",
+            active=True,  # Auto-activate when ready
             processing_info=processing_info,
             embedding_info=embedding_info,
             summary_info=summary_info if summary_info else None
@@ -94,6 +116,7 @@ def _process_embeddings(
     project_id: str,
     source_id: str,
     source_name: str,
+    processed_text: str,
     source_service
 ) -> Dict[str, Any]:
     """
@@ -101,35 +124,23 @@ def _process_embeddings(
 
     Educational Note: We ALWAYS chunk and embed every source for consistent
     retrieval. The token count is used for chunk sizing decisions.
+    Chunks are uploaded to Supabase Storage.
     """
-    processed_path = get_processed_dir(project_id) / f"{source_id}.txt"
-
-    if not processed_path.exists():
-        return {
-            "is_embedded": False,
-            "embedded_at": None,
-            "token_count": 0,
-            "chunk_count": 0,
-            "reason": "Processed text file not found"
-        }
-
     try:
-        with open(processed_path, "r", encoding="utf-8") as f:
-            processed_text = f.read()
-
         # Get embedding info (always embeds, token count used for chunking)
         _, token_count, reason = needs_embedding(text=processed_text)
 
+        # Update status to "embedding" before starting
         source_service.update_source(project_id, source_id, status="embedding")
         print(f"Starting embedding for {source_name} ({reason})")
 
-        chunks_dir = get_chunks_dir(project_id)
+        # Process embeddings using the embedding service
+        # Chunks are automatically uploaded to Supabase Storage
         return embedding_service.process_embeddings(
             project_id=project_id,
             source_id=source_id,
             source_name=source_name,
-            processed_text=processed_text,
-            chunks_dir=chunks_dir
+            processed_text=processed_text
         )
 
     except Exception as e:

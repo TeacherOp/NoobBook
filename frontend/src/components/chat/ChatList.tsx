@@ -5,7 +5,7 @@
  * message count and last updated time.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 import { Input } from '../ui/input';
@@ -18,7 +18,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../ui/dialog';
-import { Sparkle, Plus, Clock, Hash, Trash, PencilSimple } from '@phosphor-icons/react';
+import { Sparkle, Plus, Clock, Hash, Trash, PencilSimple, MagnifyingGlass, X } from '@phosphor-icons/react';
 import type { ChatMetadata } from '../../lib/api/chats';
 
 interface ChatListProps {
@@ -66,6 +66,28 @@ export const ChatList: React.FC<ChatListProps> = ({
     setRenameDialogOpen(true);
   };
 
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
+
+  // Debounce search query
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 300);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [searchQuery]);
+
+  // Filter chats
+  const filteredChats = chats.filter((chat) =>
+    chat.title.toLowerCase().includes(debouncedSearchQuery.toLowerCase())
+  );
+
+  const isFiltering = debouncedSearchQuery.length > 0;
+
   const handleRenameSubmit = () => {
     if (renameChatId && renameValue.trim()) {
       onRenameChat(renameChatId, renameValue.trim());
@@ -90,16 +112,50 @@ export const ChatList: React.FC<ChatListProps> = ({
       </div>
 
       {/* New Chat Button - in controls section */}
-      <div className="px-4 pt-4">
+      <div className="px-4 py-3 space-y-3">
+        <div className="relative">
+          <MagnifyingGlass
+            size={16}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search chats..."
+            className="pl-9 pr-8 h-9"
+          />
+          {searchQuery && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="absolute right-1 top-1/2 -translate-y-1/2 h-7 w-7 text-muted-foreground hover:text-foreground"
+              onClick={() => setSearchQuery('')}
+            >
+              <X size={14} />
+            </Button>
+          )}
+        </div>
+
         <Button onClick={onNewChat} variant="soft" className="w-full gap-2">
           <Plus size={16} />
           New Chat
         </Button>
+
+        {isFiltering && (
+          <p className="text-xs text-muted-foreground px-1">
+            Showing {filteredChats.length} of {chats.length} chats
+          </p>
+        )}
       </div>
 
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-2">
-          {chats.map((chat) => (
+          {filteredChats.length === 0 && isFiltering ? (
+             <div className="text-center py-8 text-muted-foreground">
+               <p className="text-sm">No chats found</p>
+             </div>
+           ) : (
+            filteredChats.map((chat) => (
             <div
               key={chat.id}
               className="p-3 border rounded-lg hover:bg-accent transition-colors group"
@@ -150,7 +206,8 @@ export const ChatList: React.FC<ChatListProps> = ({
                 {chat.message_count} messages
               </p>
             </div>
-          ))}
+          )))
+          }
         </div>
       </ScrollArea>
     </div>

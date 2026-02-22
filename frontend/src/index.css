@@ -3,94 +3,176 @@
 @tailwind utilities;
 
 /**
- * NoobBook Design System - Stone + Amber Theme
+ * NoobBook Design System - Attest Tokens
  *
- * A warm, readable color palette optimized for learning/reading apps.
+ * Colors sourced directly from the Attest Design System (design-system.attest.tech).
+ * Palette reference:
+ *   - Primary (interactive): teal-70  #00829b
+ *   - Background:            grey-50  #fafafa
+ *   - Surface:               white    #ffffff
+ *   - Text default:          grey-900 #2d2d2d
+ *   - Text subdued:          grey-700 #6e6f6f
+ *   - Border default:        grey-500 #b3b5b5
+ *   - Brand accent:          firecracker #f7622b
+ *   - Font:                  Inter
  *
- * Color Reference:
- * - Background: stone-50 (#FAFAF9) - warm off-white
- * - Surface: white (#FFFFFF) - cards, panels
- * - Text Primary: stone-800 (#292524) - warm dark gray
- * - Text Muted: stone-500 (#78716C) - warm medium gray
- * - Accent: amber-600 (#D97706) - warm gold
- * - Border: stone-200 (#E7E5E3) - subtle warm gray
+ * The shadcn-vue CSS variable names (--background, --primary, etc.) are mapped
+ * to Attest palette values so all shadcn components adopt the Attest look
+ * without changing component code.
  */
 
+/* ─── Attest Palette (raw values, available as utilities) ─────────────────── */
 @layer base {
   :root {
-    /* Background colors - slightly tinted for contrast with white panels */
-    --background: 40 15% 95%;          /* warm cream/beige - more visible than stone-50 */
-    --foreground: 12 10% 15%;          /* stone-800: warm dark text */
+    /* Attest grey scale */
+    --attest-grey-50:   #fafafa;
+    --attest-grey-100:  #f5f5f5;
+    --attest-grey-200:  #eaebeb;
+    --attest-grey-300:  #e1e2e2;
+    --attest-grey-400:  #c2c2c2;
+    --attest-grey-500:  #b3b5b5;
+    --attest-grey-600:  #8b8d8d;
+    --attest-grey-700:  #6e6f6f;
+    --attest-grey-800:  #4c4c4c;
+    --attest-grey-900:  #2d2d2d;
+    --attest-grey-1000: #191919;
 
-    /* Card/Panel surfaces - pure white for maximum contrast */
-    --card: 0 0% 100%;                 /* pure white for cards */
-    --card-foreground: 12 10% 15%;     /* stone-800 */
+    /* Attest teal scale (primary / interactive) */
+    --attest-teal-10: #f1f6f6;
+    --attest-teal-20: #e2eef1;
+    --attest-teal-30: #cfe6ec;
+    --attest-teal-40: #99c9d7;
+    --attest-teal-50: #81bdce;
+    --attest-teal-60: #2f98b1;
+    --attest-teal-70: #00829b;
+    --attest-teal-80: #195260;
+    --attest-teal-90: #183037;
 
-    /* Popover surfaces */
-    --popover: 0 0% 100%;              /* white */
-    --popover-foreground: 12 10% 15%;  /* stone-800 */
+    /* Attest red scale (destructive) */
+    --attest-red-10: #faf5f4;
+    --attest-red-20: #f8e7e3;
+    --attest-red-60: #eb6044;
+    --attest-red-70: #ce361c;
+    --attest-red-80: #8f2512;
 
-    /* Primary accent - Amber */
-    --primary: 32 95% 44%;             /* amber-600: warm gold */
-    --primary-foreground: 0 0% 100%;   /* white text on amber */
+    /* Attest green scale (positive) */
+    --attest-green-10: #eef7f3;
+    --attest-green-20: #ddf0e7;
+    --attest-green-60: #429d69;
+    --attest-green-70: #1b7c4a;
 
-    /* Secondary - subtle stone */
-    --secondary: 60 5% 96%;            /* stone-100 */
-    --secondary-foreground: 12 10% 15%; /* stone-800 */
-
-    /* Muted elements */
-    --muted: 60 5% 96%;                /* stone-100 */
-    --muted-foreground: 25 6% 45%;     /* stone-500 */
-
-    /* Accent - same as primary for consistency */
-    --accent: 48 96% 89%;              /* amber-100: light amber for hover states */
-    --accent-foreground: 32 95% 38%;   /* amber-700: darker amber text */
-
-    /* Destructive - warm red */
-    --destructive: 0 72% 51%;          /* red-500 */
-    --destructive-foreground: 0 0% 100%; /* white */
-
-    /* Borders and inputs */
-    --border: 30 6% 90%;               /* stone-200 */
-    --input: 30 6% 90%;                /* stone-200 */
-    --ring: 32 95% 44%;                /* amber-600 for focus rings */
-
-    /* Border radius */
-    --radius: 0.5rem;
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-  .dark {
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    /* Attest firecracker (brand accent) */
+    --attest-firecracker-30: #efdfcd;
+    --attest-firecracker-60: #de6c2b;
+    --attest-firecracker-70: #af5623;
   }
 }
 
+/* ─── shadcn-vue CSS variable mapping → Attest tokens ────────────────────── */
+@layer base {
+  :root {
+    /* Surfaces */
+    --background: 0 0% 98%;          /* attest-grey-50  #fafafa  */
+    --foreground: 0 0% 18%;          /* attest-grey-900 #2d2d2d  */
+
+    --card: 0 0% 100%;               /* white                    */
+    --card-foreground: 0 0% 18%;     /* attest-grey-900          */
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 18%;
+
+    /* Primary — Attest teal-70 (#00829b) → HSL 192 100% 30% */
+    --primary: 192 100% 30%;
+    --primary-foreground: 0 0% 100%; /* white on teal            */
+
+    /* Secondary — attest-grey-100 (#f5f5f5) */
+    --secondary: 0 0% 96%;
+    --secondary-foreground: 0 0% 18%;
+
+    /* Muted — attest-grey-100 */
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 43%;    /* attest-grey-700 #6e6f6f  */
+
+    /* Accent — attest-teal-10 (#f1f6f6) for hover states */
+    --accent: 186 27% 95%;
+    --accent-foreground: 192 100% 30%;
+
+    /* Destructive — attest-red-70 (#ce361c) → HSL 11 79% 46% */
+    --destructive: 11 79% 46%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Borders — attest-grey-300 (#e1e2e2) */
+    --border: 180 2% 88%;
+    --input: 180 2% 88%;
+
+    /* Focus ring — attest-teal-70 */
+    --ring: 192 100% 30%;
+
+    /* Border radius — Attest uses 4px base */
+    --radius: 0.25rem;
+
+    /* Sidebar (uses Attest grey scale) */
+    --sidebar-background: 0 0% 96%;
+    --sidebar-foreground: 0 0% 18%;
+    --sidebar-primary: 192 100% 30%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 186 27% 95%;
+    --sidebar-accent-foreground: 192 100% 30%;
+    --sidebar-border: 180 2% 88%;
+    --sidebar-ring: 192 100% 30%;
+  }
+
+  .dark {
+    --background: 0 0% 10%;
+    --foreground: 0 0% 96%;
+    --card: 0 0% 12%;
+    --card-foreground: 0 0% 96%;
+    --popover: 0 0% 12%;
+    --popover-foreground: 0 0% 96%;
+    --primary: 192 100% 30%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 0 0% 18%;
+    --secondary-foreground: 0 0% 96%;
+    --muted: 0 0% 18%;
+    --muted-foreground: 0 0% 55%;
+    --accent: 192 30% 20%;
+    --accent-foreground: 186 60% 70%;
+    --destructive: 11 79% 46%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 22%;
+    --input: 0 0% 22%;
+    --ring: 192 100% 30%;
+    --sidebar-background: 0 0% 10%;
+    --sidebar-foreground: 0 0% 96%;
+    --sidebar-primary: 192 100% 30%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 192 30% 20%;
+    --sidebar-accent-foreground: 186 60% 70%;
+    --sidebar-border: 0 0% 22%;
+    --sidebar-ring: 192 100% 30%;
+  }
+}
+
+/* ─── Base styles ─────────────────────────────────────────────────────────── */
 @layer base {
   * {
     @apply border-border;
   }
   body {
     @apply bg-background text-foreground;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    /* Attest main font: Inter */
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+      "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 }
 
-/* Animated audio bars for playing indicator */
+/* ─── Button soft variant (adapts to Attest grey palette) ────────────────── */
+/* Keeps the soft/brand button variants working with new tokens.              */
+/* soft: was stone-based, now uses attest-grey-200/100                        */
+
+/* ─── Animated audio bars for playing indicator ──────────────────────────── */
 @keyframes audio-bar-1 { 0%, 100% { height: 20%; } 50% { height: 80%; } }
 @keyframes audio-bar-2 { 0%, 100% { height: 60%; } 50% { height: 20%; } }
 @keyframes audio-bar-3 { 0%, 100% { height: 40%; } 50% { height: 100%; } }
@@ -102,7 +184,7 @@
 .audio-bar:nth-child(3) { animation: audio-bar-3 1.2s ease-in-out infinite 0.3s; }
 .audio-bar:nth-child(4) { animation: audio-bar-4 1.2s ease-in-out infinite 0.45s; }
 
-/* Audio seekbar — amber track with lighter unfilled portion */
+/* ─── Audio seekbar ───────────────────────────────────────────────────────── */
 .audio-seekbar {
   -webkit-appearance: none;
   appearance: none;
@@ -145,14 +227,10 @@
   background: hsl(var(--primary));
 }
 
-/* Smooth panel collapse/expand animation
- * Targets react-resizable-panels flex properties.
- * ease-out gives a natural deceleration — fast start, smooth stop. */
+/* ─── Panel resize animation ──────────────────────────────────────────────── */
 [data-panel] {
   transition: flex-basis 300ms ease-out, flex-grow 300ms ease-out, flex-shrink 300ms ease-out;
 }
-
-/* Disable transition during drag resize so manual resizing stays snappy */
 [data-panel-group]:has([data-resize-handle-state="drag"]) [data-panel] {
   transition: none !important;
 }

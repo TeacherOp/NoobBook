@@ -23,7 +23,7 @@ BOLD='\033[1m'
 # Get the root directory (parent of bin/)
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
-FRONTEND_DIR="$ROOT_DIR/frontend"
+FRONTEND_DIR="$ROOT_DIR/frontend"   # Vue 3 frontend (frontend-react/ = archived React app)
 
 # Get backend port from .env or use default
 BACKEND_PORT=5001
@@ -59,7 +59,7 @@ for arg in "$@"; do
             echo ""
             echo "Options:"
             echo "  --backend-only    Start only the backend server (Flask on :5001)"
-            echo "  --frontend-only   Start only the frontend server (Vite on :5173)"
+            echo "  --frontend-only   Start only the frontend server (Vite on :5174)"
             echo "  --install         Install/update dependencies before starting"
             echo "  --help            Show this help message"
             echo ""
@@ -224,7 +224,7 @@ main() {
         echo -e "  ${CYAN}Backend:${NC}  http://localhost:$BACKEND_PORT"
     fi
     if [ "$BACKEND_ONLY" != true ]; then
-        echo -e "  ${YELLOW}Frontend:${NC} http://localhost:5173"
+        echo -e "  ${YELLOW}Frontend:${NC} http://localhost:5174"
     fi
     echo ""
     echo -e "${BOLD}Press Ctrl+C to stop${NC}"

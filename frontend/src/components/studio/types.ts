@@ -5,80 +5,41 @@
  */
 
 import {
-  FileText,
-  Brain,
-  Headphones,
-  Exam,
-  Cards,
-  TreeStructure,
-  ChartBar,
-  Target,
-  Image,
-  Article,
-  ShareNetwork,
-  Globe,
-  EnvelopeSimple,
-  Cube,
-  ChartPieSlice,
-  FlowArrow,
-  Layout,
-  PresentationChart,
-  VideoCamera,
-} from '@phosphor-icons/react';
+  PhFileText,
+  PhBrain,
+  PhHeadphones,
+  PhExam,
+  PhCards,
+  PhTreeStructure,
+  PhChartBar,
+  PhTarget,
+  PhImage,
+  PhArticle,
+  PhShareNetwork,
+  PhGlobe,
+  PhEnvelopeSimple,
+  PhCube,
+  PhChartPieSlice,
+  PhFlowArrow,
+  PhLayout,
+  PhPresentationChart,
+  PhVideoCamera,
+} from '@phosphor-icons/vue'
+import type { Component } from 'vue'
 
-/**
- * Studio item categories - matches backend enum
- */
-export type GenerationCategory = 'learning' | 'business' | 'content';
-
-/**
- * Studio item IDs - matches backend studio_item enum exactly
- */
-export type StudioItemId =
-  | 'quiz'
-  | 'flash_cards'
-  | 'audio_overview'
-  | 'mind_map'
-  | 'business_report'
-  | 'marketing_strategy'
-  | 'ads_creative'
-  | 'prd'
-  | 'infographics'
-  | 'flow_diagram'
-  | 'wireframes'
-  | 'presentation'
-  | 'blog'
-  | 'social'
-  | 'website'
-  | 'email_templates'
-  | 'components'
-  | 'video';
-
-/**
- * Studio signal from backend - sent by main chat AI
- * Educational Note: These signals activate studio items contextually.
- * Multiple signals can exist for the same studio_item (different topics).
- */
-export interface StudioSignal {
-  id: string;
-  studio_item: StudioItemId;
-  direction: string;
-  sources: Array<{
-    source_id: string;
-    chunk_ids?: string[];
-  }>;
-  created_at: string;
-}
+// Re-export framework-agnostic types from lib
+export type { StudioSignal, StudioItemId, GenerationCategory } from '@/lib/types/studio'
+import type { StudioItemId, GenerationCategory, StudioSignal } from '@/lib/types/studio'
 
 /**
  * Single generation option configuration
  */
 export interface GenerationOption {
-  id: StudioItemId;
-  title: string;
-  description: string;
-  icon: React.ComponentType<{ size?: number; className?: string }>;
-  category: GenerationCategory;
+  id: StudioItemId
+  title: string
+  description: string
+  icon: Component
+  category: GenerationCategory
 }
 
 /**
@@ -91,28 +52,28 @@ export const generationOptions: GenerationOption[] = [
     id: 'quiz',
     title: 'Quiz',
     description: 'Test knowledge retention',
-    icon: Exam,
+    icon: PhExam,
     category: 'learning',
   },
   {
     id: 'flash_cards',
     title: 'Flash Cards',
     description: 'Memorize key concepts',
-    icon: Cards,
+    icon: PhCards,
     category: 'learning',
   },
   {
     id: 'audio_overview',
     title: 'Audio Overview',
     description: 'Listen to content summary',
-    icon: Headphones,
+    icon: PhHeadphones,
     category: 'learning',
   },
   {
     id: 'mind_map',
     title: 'Mind Map',
     description: 'Visualize relationships',
-    icon: TreeStructure,
+    icon: PhTreeStructure,
     category: 'learning',
   },
 
@@ -121,49 +82,49 @@ export const generationOptions: GenerationOption[] = [
     id: 'business_report',
     title: 'Business Report',
     description: 'Data insights & metrics',
-    icon: ChartBar,
+    icon: PhChartBar,
     category: 'business',
   },
   {
     id: 'marketing_strategy',
     title: 'Marketing Strategy',
     description: 'Growth plans & positioning',
-    icon: Target,
+    icon: PhTarget,
     category: 'business',
   },
   {
     id: 'prd',
     title: 'PRD',
     description: 'Product requirements doc',
-    icon: FileText,
+    icon: PhFileText,
     category: 'business',
   },
   {
     id: 'infographics',
     title: 'Infographics',
     description: 'Visual data storytelling',
-    icon: ChartPieSlice,
+    icon: PhChartPieSlice,
     category: 'business',
   },
   {
     id: 'flow_diagram',
     title: 'Flow Diagram',
     description: 'Process & system flows',
-    icon: FlowArrow,
+    icon: PhFlowArrow,
     category: 'business',
   },
   {
     id: 'wireframes',
     title: 'Wireframes',
     description: 'UI/UX design mockups',
-    icon: Layout,
+    icon: PhLayout,
     category: 'business',
   },
   {
     id: 'presentation',
     title: 'Presentation',
     description: 'Slide decks & pitches',
-    icon: PresentationChart,
+    icon: PhPresentationChart,
     category: 'business',
   },
 
@@ -172,64 +133,64 @@ export const generationOptions: GenerationOption[] = [
     id: 'blog',
     title: 'Blog Post',
     description: 'Long-form articles',
-    icon: Article,
+    icon: PhArticle,
     category: 'content',
   },
   {
     id: 'social',
     title: 'Social Posts',
     description: 'LinkedIn/Instagram/X',
-    icon: ShareNetwork,
+    icon: PhShareNetwork,
     category: 'content',
   },
   {
     id: 'website',
     title: 'Website',
     description: 'Landing & product pages',
-    icon: Globe,
+    icon: PhGlobe,
     category: 'content',
   },
   {
     id: 'email_templates',
     title: 'Email Templates',
     description: 'Marketing & transactional',
-    icon: EnvelopeSimple,
+    icon: PhEnvelopeSimple,
     category: 'content',
   },
   {
     id: 'components',
     title: 'Components',
     description: 'UI components & patterns',
-    icon: Cube,
+    icon: PhCube,
     category: 'content',
   },
   {
     id: 'ads_creative',
     title: 'Ads Creative',
     description: 'Instagram/Facebook ads',
-    icon: Image,
+    icon: PhImage,
     category: 'content',
   },
   {
     id: 'video',
     title: 'Video',
     description: 'Video scripts & content',
-    icon: VideoCamera,
+    icon: PhVideoCamera,
     category: 'content',
   },
-];
+]
 
 /**
  * Category metadata for section headers
  */
 export const categoryMeta: Record<
   GenerationCategory,
-  { label: string; icon: React.ComponentType<{ size?: number; className?: string }> }
+  { label: string; icon: Component }
 > = {
-  learning: { label: 'Learning', icon: Brain },
-  business: { label: 'Business & Product', icon: ChartBar },
-  content: { label: 'Content', icon: Article },
-};
+  learning: { label: 'Learning', icon: PhBrain },
+  business: { label: 'Business & Product', icon: PhChartBar },
+  content: { label: 'Content', icon: PhArticle },
+}
 
 /**
  * Helper to get signals for a specific studio item
@@ -238,8 +199,8 @@ export const getSignalsForItem = (
   signals: StudioSignal[],
   itemId: StudioItemId
 ): StudioSignal[] => {
-  return signals.filter((s) => s.studio_item === itemId);
-};
+  return signals.filter((s) => s.studio_item === itemId)
+}
 
 /**
  * Helper to check if a studio item is active (has signals)
@@ -248,5 +209,5 @@ export const isItemActive = (
   signals: StudioSignal[],
   itemId: StudioItemId
 ): boolean => {
-  return signals.some((s) => s.studio_item === itemId);
-};
+  return signals.some((s) => s.studio_item === itemId)
+}

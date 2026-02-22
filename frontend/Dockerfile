@@ -1,10 +1,10 @@
-# Stage 1: Build the React application
+# Stage 1: Build the Vue application
 FROM node:20-alpine AS build
 
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 
 COPY . .
 

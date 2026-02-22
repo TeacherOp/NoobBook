@@ -6,7 +6,7 @@
  */
 
 import axios from 'axios';
-import type { StudioSignal } from '../../components/studio/types';
+import type { StudioSignal } from '../types/studio';
 import { API_BASE_URL } from './client';
 import { createLogger } from '@/lib/logger';
 
@@ -344,4 +344,4 @@ class ChatsAPI {
 export const chatsAPI = new ChatsAPI();
 
 // Re-export StudioSignal for convenience (single source of truth from studio/types)
-export type { StudioSignal } from '../../components/studio/types';
+export type { StudioSignal } from '../types/studio';

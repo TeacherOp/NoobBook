@@ -14,7 +14,7 @@ bin/dev
 
 # Options
 bin/dev --backend-only    # Only Flask server (http://localhost:5001)
-bin/dev --frontend-only   # Only Vite server (http://localhost:5173)
+bin/dev --frontend-only   # Only Vite server (http://localhost:5174)
 bin/dev --install         # Update deps before starting
 ```
 
@@ -135,18 +135,26 @@ Website: [noobbooklm.com](https://noobbooklm.com)
 ### Code Quality & Structure
 - Follow DRY — extract repeated logic into reusable functions/components - Think of this as the learning session will be attended by the Founder of Python! He should be amazed not disgusted
 - Keep code modular — one component/function per file when it exceeds 100 lines
-- Prefer composition over inheritance in React components
+- Prefer composition over inheritance in Vue components
 
-### Frontend Rules (React + Vite + shadcn + Tailwind)
-- **Always check shadcn/ui first** — before creating custom components, search if shadcn already provides it
-- Use shadcn components via: `npx shadcn@latest add [component-name]`
+### Frontend Rules (Vue 3 + Vite + shadcn-vue + Tailwind)
+- **Framework**: Vue 3 Composition API with `<script setup lang="ts">` — no Options API
+- **Always check shadcn-vue first** — before creating custom components, search if shadcn-vue already provides it
+- Use shadcn-vue components via: `npx shadcn-vue@latest add [component-name]`
 - Tailwind for all styling — no inline styles or separate CSS files unless absolutely necessary
-- Toast notifications use the custom hook from `./ui/toast` (not `../hooks/use-toast`)
+- Toast notifications use `toast` from `vue-sonner`: `import { toast } from 'vue-sonner'`
+- State: `ref()` / `computed()` — NOT `useState` / `useMemo`
+- Side effects: `onMounted()` / `watch()` — NOT `useEffect`
+- Shared state: `provide` / `inject` with `InjectionKey` — NOT React Context
+- Events: `defineEmits<{ eventName: [arg: Type] }>()` — NOT callback props
+- `frontend-react/` — archived React app, do NOT modify
 
 ### Design System
-- **Icons**: Use Phosphor Icons (`@phosphor-icons/react`) — NOT Lucide React
-- **Colors**: Amber-600 primary (`#D97706`), Stone-800 text, warm cream background
-- **Full spec**: See `frontend/DESIGN_SYSTEM.md` for complete reference
+- **Icons**: Use Phosphor Icons (`@phosphor-icons/vue`) — NOT Lucide
+- **Colors**: Attest teal-70 primary (`#00829b`), Attest grey-900 text (`#2d2d2d`), grey-50 background (`#fafafa`)
+- **Font**: Inter
+- **Palette**: Full `--attest-*` CSS variables available in `frontend/src/index.css`
+- **Tailwind utilities**: `bg-attest-teal-70`, `text-attest-grey-900`, etc.
 
 ### Backend Rules (Python Flask)
 - Follow PEP 8 style guidelines

@@ -1,5 +1,7 @@
 # NoobBook
 
+This is my cloned version of NoobBook.
+
 <p align="center">
   <img src="assets/noob_book.png" alt="NoobBook Logo" width="120">
 </p>

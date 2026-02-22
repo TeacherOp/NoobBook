@@ -374,19 +374,27 @@ class MainChatService:
                 )
 
                 # Execute each tool and add results
+                # Educational Note: Every tool_use block MUST have a matching tool_result,
+                # otherwise the Claude API will reject the conversation with a 400 error.
+                # We wrap each execution in try/except to guarantee tool_results are stored
+                # even if a tool throws an unexpected exception.
                 for tool_block in tool_use_blocks:
                     tool_id = tool_block.get("id")
                     tool_name = tool_block.get("name")
                     tool_input = tool_block.get("input", {})
 
-                    # Execute tool
-                    result = self._execute_tool(
-                        project_id,
-                        chat_id,
-                        tool_name,
-                        tool_input,
-                        user_id=user_id,
-                    )
+                    # Execute tool (with safety net to always produce a tool_result)
+                    try:
+                        result = self._execute_tool(
+                            project_id,
+                            chat_id,
+                            tool_name,
+                            tool_input,
+                            user_id=user_id,
+                        )
+                    except Exception as tool_error:
+                        logger.error("Tool execution failed for %s: %s", tool_name, tool_error)
+                        result = f"Error executing {tool_name}: {str(tool_error)}"
 
                     # Add tool result as user message
                     message_service.add_tool_result_message(

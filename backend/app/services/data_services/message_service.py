@@ -312,6 +312,12 @@ class MessageService:
         This method converts stored messages to the API format, optionally
         including a pending message that hasn't been saved yet.
 
+        Important: This method also sanitizes the message history to handle
+        orphaned tool_use blocks (assistant messages with tool_use that never
+        got matching tool_result messages). This can happen if a tool execution
+        or database write fails mid-loop. Without sanitization, the Claude API
+        rejects the entire conversation with a 400 error.
+
         Args:
             project_id: The project UUID
             chat_id: The chat UUID
@@ -345,7 +351,92 @@ class MessageService:
                 "content": include_pending["content"]
             })
 
+        # Sanitize: ensure every tool_use block has a matching tool_result.
+        # Educational Note: The Claude API requires that every assistant message
+        # containing tool_use blocks is immediately followed by a user message
+        # with tool_result blocks for each tool_use ID. If a previous request
+        # crashed mid-loop, the DB may have orphaned tool_use blocks without
+        # matching tool_results. We fix this by injecting synthetic error
+        # tool_results so the conversation can continue.
+        api_messages = self._sanitize_tool_use_pairs(api_messages)
+
         return api_messages
+
+    @staticmethod
+    def _sanitize_tool_use_pairs(
+        api_messages: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Ensure every tool_use block has a matching tool_result in the next message.
+
+        Educational Note: Scans the message list for assistant messages that
+        contain tool_use blocks. For each such message, checks if the immediately
+        following user message contains the required tool_result blocks. If any
+        tool_use IDs are missing their tool_result, injects a synthetic user
+        message with error tool_results before the next message.
+
+        Args:
+            api_messages: List of message dicts (role + content)
+
+        Returns:
+            Sanitized list with synthetic tool_results injected where needed
+        """
+        sanitized = []
+        i = 0
+
+        while i < len(api_messages):
+            msg = api_messages[i]
+            sanitized.append(msg)
+
+            # Check if this is an assistant message with tool_use blocks
+            if msg.get("role") == "assistant" and isinstance(msg.get("content"), list):
+                tool_use_ids = [
+                    block.get("id")
+                    for block in msg["content"]
+                    if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("id")
+                ]
+
+                if tool_use_ids:
+                    # Collect all tool_result IDs from subsequent user messages
+                    # (there may be multiple user messages, one per tool_result)
+                    answered_ids = set()
+                    j = i + 1
+                    while j < len(api_messages) and api_messages[j].get("role") == "user":
+                        next_content = api_messages[j].get("content")
+                        if isinstance(next_content, list):
+                            for block in next_content:
+                                if isinstance(block, dict) and block.get("type") == "tool_result":
+                                    answered_ids.add(block.get("tool_use_id"))
+                        j += 1
+
+                    # Find orphaned tool_use IDs
+                    missing_ids = [tid for tid in tool_use_ids if tid not in answered_ids]
+
+                    if missing_ids:
+                        logger.warning(
+                            "Sanitizing %d orphaned tool_use block(s) in chat history: %s",
+                            len(missing_ids),
+                            missing_ids,
+                        )
+                        # Inject synthetic tool_result for each missing ID
+                        synthetic_results = [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": tid,
+                                "content": "Error: tool execution was interrupted. Please retry if needed.",
+                                "is_error": True,
+                            }
+                            for tid in missing_ids
+                        ]
+                        # Insert right after the current assistant message
+                        sanitized.append({
+                            "role": "user",
+                            "content": synthetic_results,
+                        })
+
+            i += 1
+
+        return sanitized
 
     def build_context_from_messages(
         self,

@@ -660,7 +660,7 @@ export const SourcesPanel: React.FC<SourcesPanelProps> = ({
           </div>
         </TooltipProvider>
       ) : (
-        <div className="flex flex-col h-full">
+        <div className="flex flex-col h-full" data-tour="sources-panel">
           <SourcesHeader
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}

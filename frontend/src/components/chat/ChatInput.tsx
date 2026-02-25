@@ -8,6 +8,7 @@
 import React, { useRef, useEffect } from 'react';
 import { Textarea } from '../ui/textarea';
 import { PaperPlaneTilt, Microphone, CircleNotch } from '@phosphor-icons/react';
+import { useTutorial } from '../../hooks/useTutorial';
 
 interface ChatInputProps {
   message: string;
@@ -30,6 +31,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onSend,
   onMicClick,
 }) => {
+  const { isOpen } = useTutorial();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Display value combines typed message and partial transcript
@@ -63,14 +65,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   return (
-    <div className="p-4 pt-2">
+    <div className="p-4 pt-2" data-tour="chat-input">
       {/* Floating pill container - mic, textarea, send all inside */}
       <div className="flex items-center gap-2 border rounded-2xl px-3 py-2 bg-background">
         {/* Microphone Button - seamlessly integrated */}
         <button
           type="button"
           onClick={onMicClick}
-          disabled={sending || !transcriptionConfigured}
+          disabled={sending || !transcriptionConfigured || isOpen}
           title={
             !transcriptionConfigured
               ? 'Set up ElevenLabs API key in settings'
@@ -78,13 +80,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               ? 'Wait for response to complete'
               : isRecording
               ? 'Click to stop recording'
+              : isOpen
+              ? 'Tutorial is active'
               : 'Click to start recording'
           }
           className={`flex-shrink-0 p-1.5 rounded-full transition-colors ${
             isRecording
               ? 'bg-red-500 text-white animate-pulse'
               : 'text-muted-foreground hover:text-foreground'
-          } ${sending || !transcriptionConfigured ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+          } ${sending || !transcriptionConfigured || isOpen ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
         >
           <Microphone size={18} />
         </button>
@@ -98,6 +102,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               ? 'Listening...'
               : !transcriptionConfigured
               ? 'Type your message... (voice disabled - set API key)'
+              : isOpen
+              ? 'Tutorial is active'
               : 'Ask about your sources... (Shift+Enter for new line)'
           }
           value={displayMessage}
@@ -106,7 +112,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           className={`flex-1 py-1.5 min-h-[32px] max-h-[100px] resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent ${
             partialTranscript ? 'text-muted-foreground' : ''
           }`}
-          disabled={sending || isRecording}
+          disabled={sending || isRecording || isOpen}
           rows={1}
         />
 
@@ -114,7 +120,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         <button
           type="button"
           onClick={onSend}
-          disabled={!message.trim() || sending || isRecording}
+          disabled={!message.trim() || sending || isRecording || isOpen}
           className="flex-shrink-0 p-1.5 rounded-full text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {sending ? (

@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useParams } from 'react-router-dom';
 import { Dashboard, CreateProjectDialog } from './components/dashboard';
 import { ProjectWorkspace } from './components/project';
+import { TutorialProvider } from './contexts/TutorialContext';
+import { OnboardingTutorial } from './components/onboarding';
 
 import { projectsAPI } from './lib/api';
 import { AuthPage } from './components/auth/AuthPage';
@@ -236,17 +238,21 @@ function App() {
   }
 
   return (
-    <BrowserRouter>
-      <Routes>
+    <TutorialProvider>
+      <BrowserRouter>
+        <Routes>
         {/* Project Workspace - URL-based routing */}
         <Route
           path="/projects/:projectId"
           element={
-            <ProjectWorkspaceRoute
-              setRefreshTrigger={setRefreshTrigger}
-              isAuthenticated={isAuthenticated}
-              onSignOut={handleSignOut}
-            />
+            <>
+              <OnboardingTutorial />
+              <ProjectWorkspaceRoute
+                setRefreshTrigger={setRefreshTrigger}
+                isAuthenticated={isAuthenticated}
+                onSignOut={handleSignOut}
+              />
+            </>
           }
         />
 
@@ -270,6 +276,7 @@ function App() {
         />
       </Routes>
     </BrowserRouter>
+    </TutorialProvider>
   );
 }
 

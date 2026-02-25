@@ -1,6 +1,8 @@
 import React, { useEffect } from 'react';
 import { Button } from '../ui/button';
 import { Label } from '../ui/label';
+import { useTutorial } from '../../hooks/useTutorial';
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,7 +30,7 @@ import {
   CollapsibleTrigger,
 } from '../ui/collapsible';
 import { Textarea } from '../ui/textarea';
-import { ArrowLeft, DotsThreeVertical, Plus, Trash, FolderOpen, Gear, CircleNotch, CurrencyDollar, Brain, CaretDown, CaretRight, PencilSimple, SignOut } from '@phosphor-icons/react';
+import { ArrowLeft, DotsThreeVertical, Plus, Trash, FolderOpen, Gear, CircleNotch, CurrencyDollar, Brain, CaretDown, CaretRight, PencilSimple, SignOut, Question, Sparkle, Books, MagicWand } from '@phosphor-icons/react';
 import { Input } from '../ui/input';
 import { chatsAPI, type PromptConfig } from '../../lib/api/chats';
 import { projectsAPI, type CostTracking, type MemoryData } from '../../lib/api';
@@ -65,9 +67,12 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
   onSignOut,
 }) => {
   const { toasts, dismissToast, error, success } = useToast();
+  const { startTutorial } = useTutorial();
 
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = React.useState(false);
+  const [helpDialogOpen, setHelpDialogOpen] = React.useState(false);
+  const [helpSkipConfirmOpen, setHelpSkipConfirmOpen] = React.useState(false);
 
   // Rename dialog state
   const [renameDialogOpen, setRenameDialogOpen] = React.useState(false);
@@ -320,12 +325,15 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
           <h1 className="text-lg font-semibold">{project.name}</h1>
         </div>
 
-        {/* Cost Display with Hover Breakdown */}
-        {costs && costs.total_cost > 0 && (
+        {/* Cost Display with Hover Breakdown - always show for tutorial */}
+        {(costs && costs.total_cost > 0) && (
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <div className="flex items-center gap-1.5 px-2 py-1 bg-muted/50 rounded-md cursor-default">
+                <div 
+                  className="flex items-center gap-1.5 px-2 py-1 bg-muted/50 rounded-md cursor-default"
+                  data-tour="cost-display"
+                >
                   <CurrencyDollar size={14} className="text-muted-foreground" />
                   <span className="text-sm text-muted-foreground font-medium">
                     {formatCost(costs.total_cost)}
@@ -377,6 +385,31 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
             </Tooltip>
           </TooltipProvider>
         )}
+        
+        {/* Default cost display for new users - always visible */}
+        {(!costs || costs.total_cost === 0) && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div 
+                  className="flex items-center gap-1.5 px-2 py-1 bg-muted/50 rounded-md cursor-default"
+                  data-tour="cost-display"
+                >
+                  <CurrencyDollar size={14} className="text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground font-medium">
+                    $0.00
+                  </span>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="p-3">
+                <div className="space-y-2 text-xs">
+                  <p className="font-semibold text-sm mb-2">API Usage</p>
+                  <p className="text-muted-foreground">No usage yet. Start chatting to see costs here!</p>
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </div>
 
       {/* Right side - Actions */}
@@ -386,6 +419,7 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
           size="sm"
           onClick={handleOpenMemory}
           className="gap-2"
+          data-tour="memory-btn"
         >
           <Brain size={16} />
           Memory
@@ -396,6 +430,7 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
           size="sm"
           onClick={handleOpenSettings}
           className="gap-2"
+          data-tour="settings-btn"
         >
           <Gear size={16} />
           Project Settings
@@ -418,6 +453,11 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setHelpDialogOpen(true)}>
+              <Question size={16} className="mr-2" />
+              Learn about NoobBook
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => {
               setRenameValue(project.name);
               setRenameDialogOpen(true);
@@ -644,6 +684,158 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
               onClick={() => setSettingsDialogOpen(false)}
             >
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Learn about NoobBook Dialog */}
+      <Dialog open={helpDialogOpen} onOpenChange={setHelpDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Question size={20} />
+              Welcome to NoobBook
+            </DialogTitle>
+            <DialogDescription>
+              Learn about all the features available in your project workspace
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            {/* Sources Section */}
+            <div className="flex gap-3 p-3 rounded-lg border bg-muted/30">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <Books size={24} className="text-primary" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold">1. Sources - The Foundation</h3>
+                <p className="text-sm text-muted-foreground">
+                  All your documents, URLs, audio files live here. Add sources first - the AI needs content to work with!
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Supported: PDF, DOCX, PPTX, TXT, Images, Audio, YouTube, Websites
+                </p>
+              </div>
+            </div>
+
+            {/* Add Sources Section */}
+            <div className="flex gap-3 p-3 rounded-lg border bg-muted/30">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <Plus size={24} className="text-primary" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold">2. Add Sources - 6 Ways to Import</h3>
+                <ul className="text-sm text-muted-foreground mt-1 space-y-1">
+                  <li>• <strong>Upload:</strong> Drag & drop PDF, DOCX, PPTX, images, audio</li>
+                  <li>• <strong>Link:</strong> Add URLs/webpages</li>
+                  <li>• <strong>Paste:</strong> Paste text directly</li>
+                  <li>• <strong>Drive:</strong> Import from Google Drive</li>
+                  <li>• <strong>Research:</strong> AI researches a topic for you</li>
+                  <li>• <strong>Database:</strong> Connect to PostgreSQL/MySQL</li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Chat Section */}
+            <div className="flex gap-3 p-3 rounded-lg border bg-muted/30">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <Sparkle size={24} className="text-primary" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold">3. Chat with Your Sources</h3>
+                <p className="text-sm text-muted-foreground">
+                  Ask questions and get AI-powered answers with citations. 
+                  Click the microphone for voice input! Each chat can have different sources selected.
+                </p>
+              </div>
+            </div>
+
+            {/* Studio Section */}
+            <div className="flex gap-3 p-3 rounded-lg border bg-muted/30">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <MagicWand size={24} className="text-primary" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold">4. Studio - Generate Content</h3>
+                <ul className="text-xs text-muted-foreground mt-2 space-y-1">
+                  <li>• <strong>Learning:</strong> Quiz, Flash Cards, Audio Overview, Mind Map</li>
+                  <li>• <strong>Business:</strong> Report, Marketing Strategy, PRD, Presentation</li>
+                  <li>• <strong>Content:</strong> Blog Post, Social Posts, Website, Email</li>
+                </ul>
+              </div>
+            </div>
+
+            {/* Memory Section */}
+            <div className="flex gap-3 p-3 rounded-lg border bg-muted/30">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <Brain size={24} className="text-primary" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold">5. Memory - Personalize AI</h3>
+                <p className="text-sm text-muted-foreground">
+                  Teach the AI about you! Add your background, preferences, and project context. 
+                  User Memory applies to all projects, Project Memory is specific to this project.
+                </p>
+              </div>
+            </div>
+
+            {/* Cost Section */}
+            <div className="flex gap-3 p-3 rounded-lg border bg-muted/30">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <CurrencyDollar size={24} className="text-primary" />
+              </div>
+              <div className="flex-1">
+                <h3 className="font-semibold">6. Track Your Costs</h3>
+                <p className="text-sm text-muted-foreground">
+                  Monitor API usage in real-time. Hover over the cost display to see detailed breakdown 
+                  by model (Claude Sonnet/Haiku) with input/output token counts.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="soft"
+              className="gap-2"
+              onClick={() => {
+                localStorage.removeItem('noobbook_onboarding_completed');
+                startTutorial();
+                setHelpDialogOpen(false);
+              }}
+            >
+              <Sparkle size={16} />
+              Start Interactive Tour
+            </Button>
+            <Button
+              variant="soft"
+              onClick={() => setHelpDialogOpen(false)}
+            >
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Skip Tutorial Confirmation Dialog */}
+      <Dialog open={helpSkipConfirmOpen} onOpenChange={setHelpSkipConfirmOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Skip the tutorial?</DialogTitle>
+            <DialogDescription>
+              You can always restart it later from the three dot menu or project settings.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="soft" onClick={() => setHelpSkipConfirmOpen(false)}>
+              Continue
+            </Button>
+            <Button onClick={() => {
+              setHelpSkipConfirmOpen(false);
+              setHelpDialogOpen(false);
+            }}>
+              Skip
             </Button>
           </DialogFooter>
         </DialogContent>

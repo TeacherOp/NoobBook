@@ -8,6 +8,7 @@ import React from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Plus, MagnifyingGlass, Books } from '@phosphor-icons/react';
+import { useTutorial } from '../../hooks/useTutorial';
 
 interface SourcesHeaderProps {
   searchQuery: string;
@@ -22,6 +23,8 @@ export const SourcesHeader: React.FC<SourcesHeaderProps> = ({
   onAddClick,
   isAtLimit,
 }) => {
+  const { isOpen, nextStep } = useTutorial();
+
   return (
     <div>
       {/* Header Section - matches Chat/Studio header style */}
@@ -45,16 +48,22 @@ export const SourcesHeader: React.FC<SourcesHeaderProps> = ({
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
             className="pl-8 h-9"
+            disabled={isOpen}
           />
         </div>
 
         {/* Add Source Button */}
         <Button
-          onClick={onAddClick}
+          onClick={() => {
+            if (!isOpen) {
+              onAddClick();
+            }
+          }}
           className="w-full gap-2"
           variant="soft"
           size="sm"
-          disabled={isAtLimit}
+          disabled={isAtLimit || isOpen}
+          data-tour="add-sources-btn"
         >
           <Plus size={16} />
           Add sources

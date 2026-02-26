@@ -156,3 +156,18 @@
 [data-panel-group]:has([data-resize-handle-state="drag"]) [data-panel] {
   transition: none !important;
 }
+
+@keyframes tutorial-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.tutorial-scale-in {
+  animation: tutorial-scale-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}

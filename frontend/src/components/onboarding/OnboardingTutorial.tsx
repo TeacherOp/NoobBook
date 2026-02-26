@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useTutorial } from '../../hooks/useTutorial';
 import { Button } from '../ui/button';
 import { X, CaretLeft, CaretRight, RocketLaunch, CheckCircle, Ghost } from '@phosphor-icons/react';
@@ -11,6 +11,18 @@ interface PopoverPosition {
   arrowPosition: 'top' | 'bottom' | 'left' | 'right';
 }
 
+const SEEN_KEY = 'noobbook_onboarding_seen';
+const HIGHLIGHT_COLOR = '#D97706';
+
+const getFocusableElements = (container: HTMLElement | null): HTMLElement[] => {
+  if (!container) return [];
+  return Array.from(
+    container.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    ),
+  ).filter((el) => !el.hasAttribute('disabled') && el.getAttribute('aria-hidden') !== 'true');
+};
+
 export const OnboardingTutorial: React.FC = () => {
   const { isOpen, currentStep, steps, nextStep, prevStep, goToStep, skipTutorial } = useTutorial();
   const [position, setPosition] = useState<PopoverPosition | null>(null);
@@ -18,8 +30,17 @@ export const OnboardingTutorial: React.FC = () => {
   const [targetFound, setTargetFound] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [anchoredReady, setAnchoredReady] = useState(false);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const closeConfirmRef = useRef<HTMLDivElement>(null);
 
   const currentStepData = steps[currentStep];
+
+  // Mark tutorial as seen only when tutorial UI is actually rendered.
+  useEffect(() => {
+    if (isOpen) {
+      localStorage.setItem(SEEN_KEY, 'true');
+    }
+  }, [isOpen]);
 
   // Calculate fallback position (bottom-right corner)
   useEffect(() => {
@@ -163,6 +184,59 @@ export const OnboardingTutorial: React.FC = () => {
     };
   }, [isOpen, currentStepData, updatePosition]);
 
+  // Keyboard behavior: Escape opens/closes confirmation and Tab stays inside tutorial UI.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setShowCloseConfirm((open) => !open);
+        return;
+      }
+
+      if (event.key !== 'Tab') return;
+
+      const activeContainer = showCloseConfirm ? closeConfirmRef.current : popoverRef.current;
+      const focusable = getFocusableElements(activeContainer);
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      const insideContainer = !!(active && activeContainer?.contains(active));
+
+      if (event.shiftKey) {
+        if (!insideContainer || active === first) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (!insideContainer || active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, showCloseConfirm]);
+
+  // Keep focus in the active dialog surface.
+  useEffect(() => {
+    if (!isOpen) return;
+    const activeContainer = showCloseConfirm ? closeConfirmRef.current : popoverRef.current;
+    if (!activeContainer) return;
+
+    const rafId = requestAnimationFrame(() => {
+      const focusable = getFocusableElements(activeContainer);
+      focusable[0]?.focus();
+    });
+    return () => cancelAnimationFrame(rafId);
+  }, [isOpen, showCloseConfirm, currentStep]);
+
   // Highlight the current target element (ring + raise above backdrop)
   useEffect(() => {
     if (!isOpen || !currentStepData) return;
@@ -176,17 +250,23 @@ export const OnboardingTutorial: React.FC = () => {
     const origOutline = targetEl.style.outline;
     const origOutlineOffset = targetEl.style.outlineOffset;
     const origBorderRadius = targetEl.style.borderRadius;
+    const computedPosition = window.getComputedStyle(targetEl).position;
+    const shouldSetRelativePosition = computedPosition === 'static';
 
     // Apply highlight — use outline instead of box-shadow so it's not clipped by overflow:hidden
     targetEl.style.zIndex = '9998';
-    targetEl.style.position = 'relative';
-    targetEl.style.outline = '3px solid #db7706';
+    if (shouldSetRelativePosition) {
+      targetEl.style.position = 'relative';
+    }
+    targetEl.style.outline = `3px solid ${HIGHLIGHT_COLOR}`;
     targetEl.style.outlineOffset = '2px';
     targetEl.style.borderRadius = '12px';
 
     return () => {
       targetEl.style.zIndex = origZIndex;
-      targetEl.style.position = origPosition;
+      if (shouldSetRelativePosition) {
+        targetEl.style.position = origPosition;
+      }
       targetEl.style.outline = origOutline;
       targetEl.style.outlineOffset = origOutlineOffset;
       targetEl.style.borderRadius = origBorderRadius;
@@ -250,6 +330,8 @@ export const OnboardingTutorial: React.FC = () => {
           </span>
         </div>
         <button
+          type="button"
+          aria-label="Close tutorial"
           onClick={() => setShowCloseConfirm(true)}
           className="flex items-center justify-center w-7 h-7 rounded-full hover:bg-muted/80 transition-colors"
         >
@@ -296,6 +378,8 @@ export const OnboardingTutorial: React.FC = () => {
           {steps.map((_, idx) => (
             <button
               key={idx}
+              type="button"
+              aria-label={`Go to step ${idx + 1}: ${steps[idx].title}`}
               onClick={() => handleGoToStep(idx)}
               className={`w-1.5 h-1.5 rounded-full transition-colors ${
                 idx === currentStep
@@ -332,20 +416,6 @@ export const OnboardingTutorial: React.FC = () => {
 
   return (
     <>
-      {/* Global keyframes */}
-      <style>{`
-        @keyframes tutorial-scale-in {
-          from {
-            opacity: 0;
-            transform: scale(0.95) translateY(8px);
-          }
-          to {
-            opacity: 1;
-            transform: scale(1) translateY(0);
-          }
-        }
-      `}</style>
-
       {/* Backdrop */}
       <div
         className="fixed inset-0 z-[9998] cursor-pointer"
@@ -365,6 +435,7 @@ export const OnboardingTutorial: React.FC = () => {
             onClick={() => setShowCloseConfirm(false)}
           />
           <div
+            ref={closeConfirmRef}
             className="relative mx-4 max-w-sm w-full"
             style={{
               background: 'hsl(var(--card))',
@@ -397,7 +468,11 @@ export const OnboardingTutorial: React.FC = () => {
       {/* Single unified tutorial dialog — slides between fallback and anchored positions */}
       {fallbackPosition && (
         <div
-          className="fixed z-[9999]"
+          ref={popoverRef}
+          className={`fixed z-[9999] ${!targetFound && currentStep === 0 ? 'tutorial-scale-in' : ''}`}
+          role="dialog"
+          aria-modal="true"
+          aria-label="NoobBook onboarding tutorial"
           style={{
             width: targetFound && position ? 340 : 380,
             top: targetFound && position
@@ -408,7 +483,6 @@ export const OnboardingTutorial: React.FC = () => {
               : fallbackPosition.left,
             transition: 'top 0.5s cubic-bezier(0.4, 0, 0.2, 1), left 0.5s cubic-bezier(0.4, 0, 0.2, 1), width 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
             willChange: 'top, left, width',
-            animation: !targetFound && currentStep === 0 ? 'tutorial-scale-in 0.3s cubic-bezier(0.16, 1, 0.3, 1)' : undefined,
           }}
         >
           {/* Ghost logo connector — points from dialog to target */}
@@ -429,7 +503,7 @@ export const OnboardingTutorial: React.FC = () => {
                 transition: 'opacity 0.3s ease 0.2s',
               }}
             >
-              <Ghost size={18} weight="fill" color="#db7706" />
+              <Ghost size={18} weight="fill" color={HIGHLIGHT_COLOR} />
             </div>
           )}
           {renderContent()}

@@ -58,12 +58,9 @@ const defaultSteps: TourStep[] = [
 const getInitialTutorialState = () => {
   const completed = localStorage.getItem(STORAGE_KEY);
   const seen = localStorage.getItem(SEEN_KEY);
-  // Auto-open only if the tutorial has NEVER been shown before (first-ever visit)
+  // Auto-open only if the tutorial has never been shown before.
+  // "Seen" is now set when the tutorial component actually renders.
   const shouldAutoOpen = !completed && !seen;
-  if (shouldAutoOpen) {
-    // Mark as seen immediately so it won't auto-open on the next project
-    localStorage.setItem(SEEN_KEY, 'true');
-  }
   return {
     isOpen: shouldAutoOpen,
     isCompleted: !!completed,

@@ -54,11 +54,7 @@ export const SourcesHeader: React.FC<SourcesHeaderProps> = ({
 
         {/* Add Source Button */}
         <Button
-          onClick={() => {
-            if (!isOpen) {
-              onAddClick();
-            }
-          }}
+          onClick={onAddClick}
           className="w-full gap-2"
           variant="soft"
           size="sm"

@@ -319,7 +319,7 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
           <ArrowLeft size={16} />
         </Button>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" data-tour="welcome-intro">
           <FolderOpen size={20} className="text-muted-foreground" />
           <h1 className="text-lg font-semibold">{project.name}</h1>
         </div>

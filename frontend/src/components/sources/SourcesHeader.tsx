@@ -23,7 +23,7 @@ export const SourcesHeader: React.FC<SourcesHeaderProps> = ({
   onAddClick,
   isAtLimit,
 }) => {
-  const { isOpen, nextStep } = useTutorial();
+  const { isOpen } = useTutorial();
 
   return (
     <div>

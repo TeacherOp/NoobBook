@@ -12,12 +12,10 @@ export interface TutorialContextType {
   currentStep: number;
   steps: TourStep[];
   isCompleted: boolean;
-  currentTarget: string | null;
   startTutorial: () => void;
   nextStep: () => void;
   prevStep: () => void;
   goToStep: (step: number) => void;
-  endTutorial: () => void;
   skipTutorial: () => void;
 }
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useTutorial } from '../../hooks/useTutorial';
 import { Button } from '../ui/button';
 import { X, CaretLeft, CaretRight, RocketLaunch, CheckCircle, Ghost } from '@phosphor-icons/react';
@@ -17,13 +17,7 @@ export const OnboardingTutorial: React.FC = () => {
   const [fallbackPosition, setFallbackPosition] = useState<{ top: number; left: number } | null>(null);
   const [targetFound, setTargetFound] = useState(false);
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
-  const [isTransitioning, setIsTransitioning] = useState(false);
-  const [displayedStep, setDisplayedStep] = useState(currentStep);
-  // When transitioning from fallback→anchored, we start at fallback and animate to target
   const [anchoredReady, setAnchoredReady] = useState(false);
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const prevStepRef = useRef(currentStep);
-  const prevTargetFoundRef = useRef(false);
 
   const currentStepData = steps[currentStep];
 
@@ -46,23 +40,9 @@ export const OnboardingTutorial: React.FC = () => {
     return () => window.removeEventListener('resize', updateFallbackPosition);
   }, []);
 
-  // Track step changes — when going from fallback→anchored, reset anchoredReady
-  // so the popover starts at fallback position before animating to anchor
-  useEffect(() => {
-    if (prevStepRef.current !== currentStep) {
-      const wasFallback = !prevTargetFoundRef.current;
-      prevStepRef.current = currentStep;
-      // Reset for new step — will be set to true once position is calculated
-      if (wasFallback) {
-        setAnchoredReady(false);
-      }
-    }
-  }, [currentStep]);
-
   // When target is found and position is calculated, trigger the animation
   // by flipping anchoredReady to true after a frame
   useEffect(() => {
-    prevTargetFoundRef.current = targetFound;
     if (targetFound && position && !anchoredReady) {
       // Use double-rAF to ensure the browser has painted at fallback position first
       let raf2 = 0;
@@ -74,18 +54,6 @@ export const OnboardingTutorial: React.FC = () => {
       return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
     }
   }, [targetFound, position, anchoredReady]);
-
-  // Animate content fade when step changes
-  useEffect(() => {
-    if (displayedStep !== currentStep) {
-      setIsTransitioning(true);
-      const timer = setTimeout(() => {
-        setDisplayedStep(currentStep);
-        setIsTransitioning(false);
-      }, 200);
-      return () => clearTimeout(timer);
-    }
-  }, [currentStep, displayedStep]);
 
   const updatePosition = useCallback(() => {
     if (!currentStepData) return;
@@ -214,6 +182,20 @@ export const OnboardingTutorial: React.FC = () => {
 
   if (!isOpen) return null;
 
+  const handleNextStep = () => {
+    setAnchoredReady(false);
+    nextStep();
+  };
+
+  const handlePrevStep = () => {
+    setAnchoredReady(false);
+    prevStep();
+  };
+
+  const handleGoToStep = (step: number) => {
+    setAnchoredReady(false);
+    goToStep(step);
+  };
 
   const progressPercent = ((currentStep + 1) / steps.length) * 100;
 
@@ -265,11 +247,7 @@ export const OnboardingTutorial: React.FC = () => {
       {/* Body */}
       <div
         className="px-5 py-4"
-        style={{
-          opacity: isTransitioning ? 0 : 1,
-          transform: isTransitioning ? 'translateY(6px)' : 'translateY(0)',
-          transition: 'opacity 0.2s ease, transform 0.2s ease',
-        }}
+        style={{ transition: 'opacity 0.2s ease, transform 0.2s ease' }}
       >
         <h3 className="font-semibold text-foreground mb-2 text-base">
           {currentStepData.title}
@@ -293,7 +271,7 @@ export const OnboardingTutorial: React.FC = () => {
           <Button
             variant="ghost"
             size="sm"
-            onClick={prevStep}
+            onClick={handlePrevStep}
             className="gap-1"
           >
             <CaretLeft size={14} weight="bold" />
@@ -305,11 +283,11 @@ export const OnboardingTutorial: React.FC = () => {
           {steps.map((_, idx) => (
             <button
               key={idx}
-              onClick={() => goToStep(idx)}
+              onClick={() => handleGoToStep(idx)}
               className={`w-1.5 h-1.5 rounded-full transition-colors ${
-                idx === currentStep 
+                idx === currentStep
                   ? 'bg-primary' 
-                  : idx < currentStep 
+                  : idx < currentStep
                     ? 'bg-primary/50' 
                     : 'bg-border'
               }`}
@@ -319,7 +297,7 @@ export const OnboardingTutorial: React.FC = () => {
 
         <Button
           size="sm"
-          onClick={nextStep}
+          onClick={handleNextStep}
           className="gap-1.5 h-8 px-4 text-xs font-medium"
           style={{ borderRadius: '8px' }}
         >
@@ -406,7 +384,6 @@ export const OnboardingTutorial: React.FC = () => {
       {/* Single unified tutorial dialog — slides between fallback and anchored positions */}
       {fallbackPosition && (
         <div
-          ref={popoverRef}
           className="fixed z-[9999]"
           style={{
             width: targetFound && position ? 340 : 380,

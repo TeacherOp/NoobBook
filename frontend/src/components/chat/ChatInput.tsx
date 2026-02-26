@@ -65,7 +65,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   return (
-    <div className="p-4 pt-2" data-tour="chat-input">
+    <div className="p-4 pt-2">
       {/* Floating pill container - mic, textarea, send all inside */}
       <div className="flex items-center gap-2 border rounded-2xl px-3 py-2 bg-background">
         {/* Microphone Button - seamlessly integrated */}

@@ -1,26 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { TutorialContext } from './TutorialContextType';
-
-export interface TourStep {
-  target: string;
-  title: string;
-  content: string;
-  position: 'top' | 'bottom' | 'left' | 'right';
-}
-
-export interface TutorialContextType {
-  isOpen: boolean;
-  currentStep: number;
-  steps: TourStep[];
-  isCompleted: boolean;
-  currentTarget: string | null;
-  startTutorial: () => void;
-  nextStep: () => void;
-  prevStep: () => void;
-  goToStep: (step: number) => void;
-  endTutorial: () => void;
-  skipTutorial: () => void;
-}
+import { TutorialContext, type TourStep } from './TutorialContextType';
 
 const STORAGE_KEY = 'noobbook_onboarding_completed';
 const SEEN_KEY = 'noobbook_onboarding_seen';
@@ -99,9 +78,6 @@ export const TutorialProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [steps] = useState<TourStep[]>(defaultSteps);
   const [isCompleted, setIsCompleted] = useState(initialState.isCompleted);
 
-  const currentStepData = steps[currentStep];
-  const currentTarget = isOpen && currentStepData ? currentStepData.target : null;
-
   const startTutorial = useCallback(() => {
     setIsOpen(true);
     setCurrentStep(0);
@@ -128,12 +104,6 @@ export const TutorialProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     setCurrentStep(step);
   }, []);
 
-  const endTutorial = useCallback(() => {
-    setIsOpen(false);
-    localStorage.setItem(STORAGE_KEY, 'true');
-    setIsCompleted(true);
-  }, []);
-
   const skipTutorial = useCallback(() => {
     setIsOpen(false);
     localStorage.setItem(STORAGE_KEY, 'true');
@@ -147,12 +117,10 @@ export const TutorialProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         currentStep,
         steps,
         isCompleted,
-        currentTarget,
         startTutorial,
         nextStep,
         prevStep,
         goToStep,
-        endTutorial,
         skipTutorial,
       }}
     >

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Button } from '../ui/button';
 import { Label } from '../ui/label';
 import { useTutorial } from '../../hooks/useTutorial';
@@ -72,7 +72,6 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = React.useState(false);
   const [helpDialogOpen, setHelpDialogOpen] = React.useState(false);
-  const [helpSkipConfirmOpen, setHelpSkipConfirmOpen] = React.useState(false);
 
   // Rename dialog state
   const [renameDialogOpen, setRenameDialogOpen] = React.useState(false);
@@ -96,27 +95,10 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
   const [expandedPrompts, setExpandedPrompts] = React.useState<Set<string>>(new Set());
 
   /**
-   * Educational Note: Load costs when component mounts.
-   */
-  useEffect(() => {
-    loadCosts();
-  }, [project.id]);
-
-  /**
-   * Refresh costs when costsVersion changes (triggered after chat messages)
-   * Educational Note: Uses version counter pattern for cross-component updates
-   */
-  useEffect(() => {
-    if (costsVersion !== undefined && costsVersion > 0) {
-      loadCosts();
-    }
-  }, [costsVersion]);
-
-  /**
    * Load project cost tracking data
    * Educational Note: Costs are tracked cumulatively in project.json
    */
-  const loadCosts = async () => {
+  const loadCosts = useCallback(async () => {
     try {
       const response = await projectsAPI.getCosts(project.id);
       if (response.data.success) {
@@ -126,7 +108,24 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
       log.error({ err }, 'failed to load costs');
       // Silently fail - costs are not critical
     }
-  };
+  }, [project.id]);
+
+  /**
+   * Educational Note: Load costs when component mounts.
+   */
+  useEffect(() => {
+    loadCosts();
+  }, [loadCosts]);
+
+  /**
+   * Refresh costs when costsVersion changes (triggered after chat messages)
+   * Educational Note: Uses version counter pattern for cross-component updates
+   */
+  useEffect(() => {
+    if (costsVersion !== undefined && costsVersion > 0) {
+      loadCosts();
+    }
+  }, [costsVersion, loadCosts]);
 
   /**
    * Load memory data (user + project memory)
@@ -813,29 +812,6 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
               onClick={() => setHelpDialogOpen(false)}
             >
               Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Skip Tutorial Confirmation Dialog */}
-      <Dialog open={helpSkipConfirmOpen} onOpenChange={setHelpSkipConfirmOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Skip the tutorial?</DialogTitle>
-            <DialogDescription>
-              You can always restart it later from the three dot menu or project settings.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="soft" onClick={() => setHelpSkipConfirmOpen(false)}>
-              Continue
-            </Button>
-            <Button onClick={() => {
-              setHelpSkipConfirmOpen(false);
-              setHelpDialogOpen(false);
-            }}>
-              Skip
             </Button>
           </DialogFooter>
         </DialogContent>

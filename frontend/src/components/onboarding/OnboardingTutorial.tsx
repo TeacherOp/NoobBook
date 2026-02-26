@@ -132,23 +132,36 @@ export const OnboardingTutorial: React.FC = () => {
   useEffect(() => {
     if (!isOpen || !currentStepData) return;
 
-    // Mark that we've had a valid position when we find a target
-    const timeoutId = setTimeout(updatePosition, 50);
+    let rafId: number | null = null;
+    const scheduleUpdate = () => {
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        updatePosition();
+      });
+    };
 
-    const timeoutId2 = setTimeout(updatePosition, 300);
-    const timeoutId3 = setTimeout(updatePosition, 600);
+    // Initial pass + observe DOM changes so the tutorial can anchor
+    // as soon as the target element is mounted.
+    scheduleUpdate();
 
-    window.addEventListener('resize', updatePosition);
-    window.addEventListener('scroll', updatePosition, true);
+    const observer = new MutationObserver(() => {
+      scheduleUpdate();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    window.addEventListener('resize', scheduleUpdate);
+    window.addEventListener('scroll', scheduleUpdate, true);
 
     return () => {
-      clearTimeout(timeoutId);
-      clearTimeout(timeoutId2);
-      clearTimeout(timeoutId3);
-      window.removeEventListener('resize', updatePosition);
-      window.removeEventListener('scroll', updatePosition, true);
+      observer.disconnect();
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+      }
+      window.removeEventListener('resize', scheduleUpdate);
+      window.removeEventListener('scroll', scheduleUpdate, true);
     };
-  }, [isOpen, currentStep, currentStepData, updatePosition]);
+  }, [isOpen, currentStepData, updatePosition]);
 
   // Highlight the current target element (ring + raise above backdrop)
   useEffect(() => {

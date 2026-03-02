@@ -138,6 +138,15 @@ export const useAdGeneration = (projectId: string) => {
     setViewingAdJob(null);
 
     try {
+      const geminiStatus = await checkGeminiStatus();
+      if (!geminiStatus.configured) {
+        if (configErrorTimer.current) clearTimeout(configErrorTimer.current);
+        setConfigError('Add your Gemini API key in Admin Settings to edit ad creatives.');
+        configErrorTimer.current = setTimeout(() => setConfigError(null), 10000);
+        setIsGeneratingAd(false);
+        return;
+      }
+
       const startResponse = await adsAPI.startGeneration(
         projectId,
         parentJob.product_name,

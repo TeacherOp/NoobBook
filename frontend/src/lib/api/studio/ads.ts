@@ -80,7 +80,9 @@ export const adsAPI = {
     productName: string,
     direction?: string,
     logoSource?: 'auto' | 'brand_icon' | 'source' | 'none',
-    logoSourceId?: string
+    logoSourceId?: string,
+    parentJobId?: string,
+    editInstructions?: string
   ): Promise<StartAdResponse> {
     try {
       const body: Record<string, unknown> = {
@@ -89,6 +91,8 @@ export const adsAPI = {
         logo_source: logoSource || 'auto',
       };
       if (logoSourceId) body.logo_source_id = logoSourceId;
+      if (parentJobId) body.parent_job_id = parentJobId;
+      if (editInstructions) body.edit_instructions = editInstructions;
 
       const response = await axios.post(
         `${API_BASE_URL}/projects/${projectId}/studio/ad-creative`,

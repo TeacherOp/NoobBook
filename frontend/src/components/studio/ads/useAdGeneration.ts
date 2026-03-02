@@ -129,6 +129,57 @@ export const useAdGeneration = (projectId: string) => {
     }
   };
 
+  /**
+   * Handle editing an existing ad job — creates a new job with previous prompts as context
+   */
+  const handleAdEdit = async (parentJob: AdJob, editInstructions: string) => {
+    setIsGeneratingAd(true);
+    setCurrentAdJob(null);
+    setViewingAdJob(null); // Close the viewer modal
+
+    try {
+      const startResponse = await adsAPI.startGeneration(
+        projectId,
+        parentJob.product_name,
+        parentJob.direction,
+        'auto',
+        undefined,
+        parentJob.id,
+        editInstructions
+      );
+
+      if (!startResponse.success || !startResponse.job_id) {
+        showError(startResponse.error || 'Failed to start ad edit.');
+        setIsGeneratingAd(false);
+        return;
+      }
+
+      showSuccess('Editing ad creatives...');
+
+      const finalJob = await adsAPI.pollJobStatus(
+        projectId,
+        startResponse.job_id,
+        (job) => setCurrentAdJob(job)
+      );
+
+      setCurrentAdJob(finalJob);
+
+      if (finalJob.status === 'ready') {
+        showSuccess(`Generated ${finalJob.images.length} edited ad creatives!`);
+        setSavedAdJobs((prev) => [finalJob, ...prev]);
+        setViewingAdJob(finalJob);
+      } else if (finalJob.status === 'error') {
+        showError(finalJob.error || 'Ad edit failed.');
+      }
+    } catch (error) {
+      log.error({ err: error }, 'ad edit failed');
+      showError(error instanceof Error ? error.message : 'Ad edit failed.');
+    } finally {
+      setIsGeneratingAd(false);
+      setCurrentAdJob(null);
+    }
+  };
+
   return {
     savedAdJobs,
     currentAdJob,
@@ -138,5 +189,6 @@ export const useAdGeneration = (projectId: string) => {
     configError,
     loadSavedJobs,
     handleAdGeneration,
+    handleAdEdit,
   };
 };

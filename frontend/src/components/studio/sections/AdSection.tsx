@@ -24,6 +24,7 @@ export const AdSection: React.FC = () => {
     configError,
     loadSavedJobs,
     handleAdGeneration,
+    handleAdEdit,
   } = useAdGeneration(projectId);
 
   // Ads show if any ads_creative signal exists (not filtered by source_id)
@@ -54,10 +55,11 @@ export const AdSection: React.FC = () => {
         <AdProgressIndicator currentAdJob={currentAdJob} />
       )}
 
-      {hasAdSignal && savedAdJobs.map((job) => (
+      {hasAdSignal && savedAdJobs.map((job, i) => (
         <AdListItem
           key={job.id}
           job={job}
+          index={savedAdJobs.length - i}
           onClick={() => setViewingAdJob(job)}
         />
       ))}
@@ -65,6 +67,7 @@ export const AdSection: React.FC = () => {
       <AdViewerModal
         viewingAdJob={viewingAdJob}
         onClose={() => setViewingAdJob(null)}
+        onEdit={(instructions) => viewingAdJob && handleAdEdit(viewingAdJob, instructions)}
       />
     </>
   );

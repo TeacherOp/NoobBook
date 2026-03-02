@@ -4,7 +4,7 @@
  * Displays image grid with hover download buttons for each creative.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -13,19 +13,31 @@ import {
   DialogTitle,
 } from '../../ui/dialog';
 import { Button } from '../../ui/button';
-import { Image, DownloadSimple } from '@phosphor-icons/react';
+import { Input } from '../../ui/input';
+import { Image, DownloadSimple, PencilSimple } from '@phosphor-icons/react';
 import type { AdJob } from '@/lib/api/studio';
 import { getAuthUrl } from '@/lib/api/client';
 
 interface AdViewerModalProps {
   viewingAdJob: AdJob | null;
   onClose: () => void;
+  onEdit?: (instructions: string) => void;
 }
 
 export const AdViewerModal: React.FC<AdViewerModalProps> = ({
   viewingAdJob,
   onClose,
+  onEdit,
 }) => {
+  const [editInput, setEditInput] = useState('');
+
+  const handleEdit = () => {
+    if (editInput.trim() && onEdit) {
+      onEdit(editInput.trim());
+      setEditInput('');
+    }
+  };
+
   return (
     <Dialog open={viewingAdJob !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -72,6 +84,26 @@ export const AdViewerModal: React.FC<AdViewerModalProps> = ({
             </div>
           ))}
         </div>
+
+        {onEdit && (
+          <div className="flex gap-2 pt-4 border-t">
+            <Input
+              value={editInput}
+              onChange={(e) => setEditInput(e.target.value)}
+              placeholder="Describe changes... (e.g., 'warmer colors', 'zoom in on product')"
+              className="flex-1"
+              onKeyDown={(e) => e.key === 'Enter' && editInput.trim() && handleEdit()}
+            />
+            <Button
+              onClick={handleEdit}
+              disabled={!editInput.trim()}
+              size="sm"
+            >
+              <PencilSimple size={14} className="mr-1" />
+              Edit
+            </Button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

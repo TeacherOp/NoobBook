@@ -68,6 +68,19 @@ def generate_ad_creative(project_id: str):
 
         direction = data.get('direction', 'Create compelling ad creatives for Facebook and Instagram.')
 
+        # Edit mode: load parent job's prompts as context for refinement
+        parent_job_id = data.get('parent_job_id')
+        edit_instructions = data.get('edit_instructions')
+        previous_prompts = None
+
+        if parent_job_id:
+            parent_job = studio_index_service.get_ad_job(project_id, parent_job_id)
+            if parent_job and parent_job.get('images'):
+                previous_prompts = [
+                    {"type": img["type"], "prompt": img["prompt"]}
+                    for img in parent_job["images"]
+                ]
+
         # Check if Gemini is configured
         if not imagen_service.is_configured():
             return jsonify({
@@ -98,7 +111,9 @@ def generate_ad_creative(project_id: str):
             direction=direction,
             logo_image_bytes=logo_image_bytes,
             logo_mime_type=logo_mime_type,
-            user_id=g.user_id
+            user_id=g.user_id,
+            previous_prompts=previous_prompts,
+            edit_instructions=edit_instructions
         )
 
         return jsonify({

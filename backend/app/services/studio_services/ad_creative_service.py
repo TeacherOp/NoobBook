@@ -52,7 +52,9 @@ class AdCreativeService:
         direction: str = "",
         logo_image_bytes: Optional[bytes] = None,
         logo_mime_type: str = "image/png",
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        previous_prompts: Optional[list] = None,
+        edit_instructions: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate ad creatives for a product.
@@ -83,14 +85,16 @@ class AdCreativeService:
             started_at=datetime.now().isoformat()
         )
 
-        # Step 1: Generate image prompts with Haiku
+        # Step 1: Generate image prompts with Claude
         prompts_result = self._generate_prompts(
             project_id=project_id,
             product_name=product_name,
             direction=direction,
             job_id=job_id,
             has_logo=logo_image_bytes is not None,
-            user_id=user_id
+            user_id=user_id,
+            previous_prompts=previous_prompts,
+            edit_instructions=edit_instructions
         )
 
         if not prompts_result.get("success"):
@@ -209,15 +213,17 @@ class AdCreativeService:
         direction: str,
         job_id: str,
         has_logo: bool = False,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        previous_prompts: Optional[list] = None,
+        edit_instructions: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Generate image prompts using Claude Haiku.
+        Generate image prompts using Claude.
 
-        Educational Note: Haiku reads the product info and generates
+        Educational Note: Claude reads the product info and generates
         optimized prompts for the image generation model.
-        When a brand logo is available, Haiku is instructed to write
-        prompts that describe incorporating the logo into the design.
+        In edit mode, previous prompts are included as context so Claude
+        refines rather than starts from scratch.
         """
         config = self._load_config()
 
@@ -231,10 +237,19 @@ class AdCreativeService:
                 "the composition) and how design elements should complement it."
             )
 
+        # Edit mode: append previous prompts and edit instructions to direction
+        effective_direction = direction or "Create compelling ad creatives for Facebook and Instagram."
+        if previous_prompts and edit_instructions:
+            edit_context = "\n\nPREVIOUS IMAGE PROMPTS (refine these based on the edit instructions):\n"
+            for p in previous_prompts:
+                edit_context += f"- {p['type']}: {p['prompt']}\n"
+            edit_context += f"\nEDIT INSTRUCTIONS: {edit_instructions}"
+            effective_direction = effective_direction + edit_context
+
         # Build user message
         user_message = config["user_message"].format(
             product_name=product_name,
-            direction=direction or "Create compelling ad creatives for Facebook and Instagram.",
+            direction=effective_direction,
             logo_context=logo_context
         )
 

@@ -9,10 +9,11 @@ import type { AdJob } from '@/lib/api/studio';
 
 interface AdListItemProps {
   job: AdJob;
+  index: number;
   onClick: () => void;
 }
 
-export const AdListItem: React.FC<AdListItemProps> = ({ job, onClick }) => {
+export const AdListItem: React.FC<AdListItemProps> = ({ job, index, onClick }) => {
   return (
     <div
       className="flex items-center gap-2.5 p-2.5 bg-muted/50 rounded-lg border hover:border-primary/50 transition-colors cursor-pointer"
@@ -22,7 +23,7 @@ export const AdListItem: React.FC<AdListItemProps> = ({ job, onClick }) => {
         <Image size={16} className="text-green-600" />
       </div>
       <div className="flex-1 min-w-0 overflow-hidden">
-        <p className="text-xs font-medium truncate">Ad Creatives</p>
+        <p className="text-xs font-medium truncate">Ad Creatives · Iteration {index}</p>
       </div>
       <span className="text-[11px] text-muted-foreground flex-shrink-0">
         {job.images.length}

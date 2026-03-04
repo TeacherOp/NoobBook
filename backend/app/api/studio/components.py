@@ -72,9 +72,7 @@ def generate_components(project_id: str):
         if parent_job_id:
             parent_job = studio_index_service.get_component_job(project_id, parent_job_id)
             if parent_job and parent_job.get('components'):
-                previous_components = {
-                    "component_category": parent_job.get("component_category"),
-                    "component_description": parent_job.get("component_description"),
+            if parent_job and parent_job.get('components'):
                 previous_components = {
                     "component_category": parent_job.get("component_category"),
                     "component_description": parent_job.get("component_description"),

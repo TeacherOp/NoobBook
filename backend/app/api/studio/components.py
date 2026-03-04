@@ -75,8 +75,11 @@ def generate_components(project_id: str):
                 previous_components = {
                     "component_category": parent_job.get("component_category"),
                     "component_description": parent_job.get("component_description"),
+                previous_components = {
+                    "component_category": parent_job.get("component_category"),
+                    "component_description": parent_job.get("component_description"),
                     "variations": [
-                        {"variation_name": c["variation_name"], "description": c["description"]}
+                        {"variation_name": c.get("variation_name", ""), "description": c.get("description", "")}
                         for c in parent_job["components"]
                     ]
                 }

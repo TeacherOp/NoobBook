@@ -125,8 +125,6 @@ export const useComponentGeneration = (projectId: string) => {
    */
   const handleComponentEdit = async (parentJob: ComponentJob, editInstructions: string) => {
     setIsGeneratingComponents(true);
-    setCurrentComponentJob(null);
-    setViewingComponentJob(null);
 
     try {
       const startResponse = await componentsAPI.startGeneration(
@@ -142,6 +140,10 @@ export const useComponentGeneration = (projectId: string) => {
         setIsGeneratingComponents(false);
         return;
       }
+
+      // Only close modal once the edit job has started successfully
+      setCurrentComponentJob(null);
+      setViewingComponentJob(null);
 
       showSuccess('Editing components...');
 

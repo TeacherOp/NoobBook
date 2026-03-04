@@ -120,6 +120,56 @@ export const useComponentGeneration = (projectId: string) => {
     }
   };
 
+  /**
+   * Handle component edit — creates a new job with previous context
+   */
+  const handleComponentEdit = async (parentJob: ComponentJob, editInstructions: string) => {
+    setIsGeneratingComponents(true);
+    setCurrentComponentJob(null);
+    setViewingComponentJob(null);
+
+    try {
+      const startResponse = await componentsAPI.startGeneration(
+        projectId,
+        parentJob.source_id,
+        parentJob.direction,
+        parentJob.id,
+        editInstructions
+      );
+
+      if (!startResponse.success || !startResponse.job_id) {
+        showError(startResponse.error || 'Failed to start component edit.');
+        setIsGeneratingComponents(false);
+        return;
+      }
+
+      showSuccess('Editing components...');
+
+      const finalJob = await componentsAPI.pollJobStatus(
+        projectId,
+        startResponse.job_id,
+        (job) => setCurrentComponentJob(job)
+      );
+
+      setCurrentComponentJob(finalJob);
+
+      if (finalJob.status === 'ready') {
+        const count = finalJob.components?.length || 0;
+        showSuccess(`Generated ${count} refined component${count !== 1 ? 's' : ''}!`);
+        setSavedComponentJobs((prev) => [finalJob, ...prev]);
+        setViewingComponentJob(finalJob);
+      } else if (finalJob.status === 'error') {
+        showError(finalJob.error_message || 'Component edit failed.');
+      }
+    } catch (error) {
+      log.error({ err: error }, 'component edit failed');
+      showError(error instanceof Error ? error.message : 'Component edit failed.');
+    } finally {
+      setIsGeneratingComponents(false);
+      setCurrentComponentJob(null);
+    }
+  };
+
   return {
     savedComponentJobs,
     currentComponentJob,
@@ -128,5 +178,6 @@ export const useComponentGeneration = (projectId: string) => {
     setViewingComponentJob,
     loadSavedJobs,
     handleComponentGeneration,
+    handleComponentEdit,
   };
 };

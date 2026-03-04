@@ -6,7 +6,7 @@ and launches the component agent as a background task to generate 2-4 component 
 """
 
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import uuid
 from datetime import datetime
 
@@ -31,7 +31,9 @@ class ComponentAgentExecutor:
         project_id: str,
         source_id: str,
         direction: str = "",
-        user_id: str = None
+        user_id: str = None,
+        previous_components: Optional[Dict] = None,
+        edit_instructions: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Execute component generation as a background task.
@@ -82,7 +84,9 @@ class ComponentAgentExecutor:
                     source_id=source_id,
                     job_id=job_id,
                     direction=direction,
-                    user_id=user_id
+                    user_id=user_id,
+                    previous_components=previous_components,
+                    edit_instructions=edit_instructions
                 )
             except Exception as e:
                 logger.exception("Component agent failed for job %s", job_id[:8])

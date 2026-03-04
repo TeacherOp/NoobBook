@@ -21,6 +21,7 @@ export const ComponentSection: React.FC = () => {
     setViewingComponentJob,
     loadSavedJobs,
     handleComponentGeneration,
+    handleComponentEdit,
   } = useComponentGeneration(projectId);
 
   const filteredJobs = useFilteredJobs(savedComponentJobs);
@@ -59,6 +60,7 @@ export const ComponentSection: React.FC = () => {
         projectId={projectId}
         viewingComponentJob={viewingComponentJob}
         onClose={() => setViewingComponentJob(null)}
+        onEdit={(instructions) => viewingComponentJob && handleComponentEdit(viewingComponentJob, instructions)}
       />
     </>
   );

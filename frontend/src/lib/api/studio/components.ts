@@ -98,15 +98,21 @@ export const componentsAPI = {
   async startGeneration(
     projectId: string,
     sourceId: string,
-    direction?: string
+    direction?: string,
+    parentJobId?: string,
+    editInstructions?: string
   ): Promise<StartComponentResponse> {
     try {
+      const body: Record<string, string> = {
+        source_id: sourceId,
+        direction: direction || '',
+      };
+      if (parentJobId) body.parent_job_id = parentJobId;
+      if (editInstructions) body.edit_instructions = editInstructions;
+
       const response = await axios.post(
         `${API_BASE_URL}/projects/${projectId}/studio/components`,
-        {
-          source_id: sourceId,
-          direction: direction || '',
-        }
+        body
       );
       return response.data;
     } catch (error) {

@@ -58,12 +58,36 @@ def generate_components(project_id: str):
 
         direction = data.get('direction', '')
 
+        # Edit mode: load parent job's component data as context for refinement
+        parent_job_id = data.get('parent_job_id')
+        edit_instructions = data.get('edit_instructions')
+        previous_components = None
+
+        if parent_job_id:
+            parent_job = studio_index_service.get_component_job(project_id, parent_job_id)
+            if parent_job and parent_job.get('components'):
+                previous_components = {
+                    "component_category": parent_job.get("component_category"),
+                    "component_description": parent_job.get("component_description"),
+                    "variations": [
+                        {"variation_name": c["variation_name"], "description": c["description"]}
+                        for c in parent_job["components"]
+                    ]
+                }
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Parent job not found or has no components to edit'
+                }), 404
+
         # Execute via component_agent_executor (creates job and launches agent)
         result = component_agent_executor.execute(
             project_id=project_id,
             source_id=source_id,
             direction=direction,
-            user_id=g.user_id
+            user_id=g.user_id,
+            previous_components=previous_components,
+            edit_instructions=edit_instructions
         )
 
         if not result.get('success'):

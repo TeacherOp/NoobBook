@@ -14,7 +14,8 @@ import {
 } from '../../ui/dialog';
 import { Button } from '../../ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../ui/tabs';
-import { SquaresFour, Copy, DownloadSimple, Check } from '@phosphor-icons/react';
+import { Input } from '../../ui/input';
+import { SquaresFour, Copy, DownloadSimple, Check, PencilSimple } from '@phosphor-icons/react';
 import { type ComponentJob } from '@/lib/api/studio';
 import { api, getAuthUrl } from '@/lib/api/client';
 import { useToast } from '../../ui/toast';
@@ -26,15 +27,25 @@ interface ComponentViewerModalProps {
   projectId: string;
   viewingComponentJob: ComponentJob | null;
   onClose: () => void;
+  onEdit?: (instructions: string) => void;
 }
 
 export const ComponentViewerModal: React.FC<ComponentViewerModalProps> = ({
   projectId: _projectId,
   viewingComponentJob,
   onClose,
+  onEdit,
 }) => {
   const { success: showSuccess } = useToast();
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [editInput, setEditInput] = useState('');
+
+  const handleEdit = () => {
+    if (editInput.trim() && onEdit) {
+      onEdit(editInput.trim());
+      setEditInput('');
+    }
+  };
 
   const copyToClipboard = async (previewUrl: string, index: number) => {
     try {
@@ -156,6 +167,22 @@ export const ComponentViewerModal: React.FC<ComponentViewerModalProps> = ({
               <div className="mt-6 p-3 bg-muted/50 rounded-lg">
                 <p className="text-xs font-medium text-muted-foreground mb-1">Usage Notes</p>
                 <p className="text-sm whitespace-pre-wrap">{viewingComponentJob.usage_notes}</p>
+              </div>
+            )}
+
+            {onEdit && (
+              <div className="flex gap-2 pt-4 border-t">
+                <Input
+                  value={editInput}
+                  onChange={(e) => setEditInput(e.target.value)}
+                  placeholder="Describe changes... (e.g., 'more padding', 'horizontal layout')"
+                  className="flex-1"
+                  onKeyDown={(e) => e.key === 'Enter' && editInput.trim() && handleEdit()}
+                />
+                <Button onClick={handleEdit} disabled={!editInput.trim()} size="sm">
+                  <PencilSimple size={14} className="mr-1" />
+                  Edit
+                </Button>
               </div>
             )}
 

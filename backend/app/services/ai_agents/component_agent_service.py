@@ -110,7 +110,9 @@ class ComponentAgentService:
         source_id: str,
         job_id: str,
         direction: str = "",
-        user_id: str = None
+        user_id: str = None,
+        previous_components: Optional[Dict[str, Any]] = None,
+        edit_instructions: Optional[str] = None
     ) -> Dict[str, Any]:
         """Run the agent to generate component variations."""
         config = self._load_config()
@@ -135,6 +137,20 @@ class ComponentAgentService:
             source_content=source_content,
             direction=effective_direction
         )
+
+        # Edit mode: append previous component info and edit instructions
+        if previous_components and edit_instructions:
+            edit_context = "\n\n## EDIT MODE — REFINE PREVIOUS COMPONENTS\n"
+            edit_context += f"Category: {previous_components.get('component_category', 'N/A')}\n"
+            edit_context += f"Description: {previous_components.get('component_description', 'N/A')}\n"
+            edit_context += "Previous variations:\n"
+            for v in previous_components.get("variations", []):
+                edit_context += f"- {v['variation_name']}: {v['description']}\n"
+            edit_context += f"\nEDIT INSTRUCTIONS: {edit_instructions}\n"
+            edit_context += "Refine the above components based on the edit instructions. Keep the same category and number of variations unless the edit instructs otherwise."
+            user_message = user_message + edit_context
+        elif edit_instructions:
+            user_message = user_message + f"\n\nADDITIONAL INSTRUCTIONS: {edit_instructions}"
 
         # Load brand context if configured for ads_creative feature
         brand_context = brand_context_loader.load_brand_context(

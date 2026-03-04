@@ -63,6 +63,12 @@ def generate_components(project_id: str):
         edit_instructions = data.get('edit_instructions')
         previous_components = None
 
+        if parent_job_id and not edit_instructions:
+            return jsonify({
+                'success': False,
+                'error': 'edit_instructions is required when parent_job_id is provided'
+            }), 400
+
         if parent_job_id:
             parent_job = studio_index_service.get_component_job(project_id, parent_job_id)
             if parent_job and parent_job.get('components'):

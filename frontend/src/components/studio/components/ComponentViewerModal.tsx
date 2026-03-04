@@ -4,7 +4,7 @@
  * Displays component variations with iframe preview, copy code, and download options.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -39,6 +39,10 @@ export const ComponentViewerModal: React.FC<ComponentViewerModalProps> = ({
   const { success: showSuccess } = useToast();
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [editInput, setEditInput] = useState('');
+
+  useEffect(() => {
+    setEditInput('');
+  }, [viewingComponentJob?.id]);
 
   const handleEdit = () => {
     if (editInput.trim() && onEdit) {

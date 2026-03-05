@@ -14,8 +14,9 @@ import {
 } from '../../ui/dialog';
 import { Button } from '../../ui/button';
 import { ScrollArea } from '../../ui/scroll-area';
-import { ChartLine, DownloadSimple, SpinnerGap } from '@phosphor-icons/react';
+import { ChartLine, DownloadSimple, SpinnerGap, PencilSimple } from '@phosphor-icons/react';
 import { marketingStrategiesAPI, type MarketingStrategyJob } from '@/lib/api/studio';
+import { Input } from '../../ui/input';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -24,6 +25,7 @@ interface MarketingStrategyViewerModalProps {
   viewingMarketingStrategyJob: MarketingStrategyJob | null;
   onClose: () => void;
   onDownload: (jobId: string) => void;
+  onEdit?: (instructions: string) => void;
 }
 
 export const MarketingStrategyViewerModal: React.FC<MarketingStrategyViewerModalProps> = ({
@@ -31,9 +33,22 @@ export const MarketingStrategyViewerModal: React.FC<MarketingStrategyViewerModal
   viewingMarketingStrategyJob,
   onClose,
   onDownload,
+  onEdit,
 }) => {
   const [markdownContent, setMarkdownContent] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
+  const [editInput, setEditInput] = useState('');
+
+  useEffect(() => {
+    setEditInput('');
+  }, [viewingMarketingStrategyJob?.id]);
+
+  const handleEdit = () => {
+    if (editInput.trim() && onEdit) {
+      onEdit(editInput.trim());
+      setEditInput('');
+    }
+  };
 
   // Fetch markdown content when modal opens
   useEffect(() => {
@@ -170,6 +185,22 @@ export const MarketingStrategyViewerModal: React.FC<MarketingStrategyViewerModal
             )}
           </div>
         </ScrollArea>
+
+        {onEdit && (
+          <div className="flex gap-2 px-6 py-3 border-t flex-shrink-0">
+            <Input
+              value={editInput}
+              onChange={(e) => setEditInput(e.target.value)}
+              placeholder="Describe changes... (e.g., 'target enterprise customers', 'add social media channels')"
+              className="flex-1"
+              onKeyDown={(e) => e.key === 'Enter' && editInput.trim() && handleEdit()}
+            />
+            <Button onClick={handleEdit} disabled={!editInput.trim()} size="sm">
+              <PencilSimple size={14} className="mr-1" />
+              Edit
+            </Button>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

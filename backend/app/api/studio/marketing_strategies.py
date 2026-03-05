@@ -45,25 +45,52 @@ def generate_marketing_strategy(project_id: str):
 
     try:
         data = request.get_json()
+
+        # Source is optional — can generate from direction alone
         source_id = data.get('source_id')
-
-        if not source_id:
-            return jsonify({
-                'success': False,
-                'error': 'source_id is required'
-            }), 400
-
         direction = data.get('direction', '')
 
-        # Get source info
-        source = source_service.get_source(project_id, source_id)
-        if not source:
+        # Get source info (if provided)
+        source_name = "Direction Only"
+        if source_id:
+            source = source_service.get_source(project_id, source_id)
+            if not source:
+                return jsonify({
+                    'success': False,
+                    'error': 'Source not found'
+                }), 404
+            source_name = source.get('name', 'Unknown Source')
+
+        # Edit mode: load parent job's document as context for refinement
+        parent_job_id = data.get('parent_job_id')
+        edit_instructions = data.get('edit_instructions')
+        previous_document = None
+
+        if parent_job_id and not edit_instructions:
             return jsonify({
                 'success': False,
-                'error': 'Source not found'
-            }), 404
+                'error': 'edit_instructions is required when parent_job_id is provided'
+            }), 400
 
-        source_name = source.get('name', 'Unknown Source')
+        if parent_job_id:
+            parent_job = studio_index_service.get_marketing_strategy_job(project_id, parent_job_id)
+            if not parent_job or not parent_job.get('markdown_file'):
+                return jsonify({
+                    'success': False,
+                    'error': 'Parent job not found or has no document to edit'
+                }), 404
+
+            # Load the full markdown content from storage
+            markdown_content = storage_service.download_studio_file(
+                project_id, "marketing_strategies", parent_job_id, parent_job['markdown_file']
+            )
+            if markdown_content:
+                previous_document = {
+                    "document_title": parent_job.get("document_title"),
+                    "product_name": parent_job.get("product_name"),
+                    "sections_written": parent_job.get("sections_written", 0),
+                    "markdown_content": markdown_content
+                }
 
         # Create job
         job_id = str(uuid.uuid4())
@@ -84,6 +111,8 @@ def generate_marketing_strategy(project_id: str):
             source_id=source_id,
             job_id=job_id,
             direction=direction,
+            previous_document=previous_document,
+            edit_instructions=edit_instructions,
         )
 
         return jsonify({

@@ -64,6 +64,53 @@ export const useMarketingStrategyGeneration = (projectId: string) => {
     }
   };
 
+  const handleMarketingStrategyEdit = async (parentJob: MarketingStrategyJob, editInstructions: string) => {
+    setIsGeneratingMarketingStrategy(true);
+    setCurrentMarketingStrategyJob(null);
+
+    try {
+      const startResponse = await marketingStrategiesAPI.startGeneration(
+        projectId,
+        parentJob.source_id,
+        parentJob.direction,
+        parentJob.id,
+        editInstructions
+      );
+
+      if (!startResponse.success || !startResponse.job_id) {
+        showError(startResponse.error || 'Failed to start marketing strategy edit.');
+        setIsGeneratingMarketingStrategy(false);
+        return;
+      }
+
+      // Close modal only after edit confirmed started
+      setViewingMarketingStrategyJob(null);
+      showSuccess('Editing marketing strategy...');
+
+      const finalJob = await marketingStrategiesAPI.pollJobStatus(
+        projectId,
+        startResponse.job_id,
+        (job) => setCurrentMarketingStrategyJob(job)
+      );
+
+      setCurrentMarketingStrategyJob(finalJob);
+
+      if (finalJob.status === 'ready') {
+        showSuccess(`Marketing strategy updated: ${finalJob.document_title || 'Marketing Strategy'}`);
+        setSavedMarketingStrategyJobs((prev) => [finalJob, ...prev]);
+        setViewingMarketingStrategyJob(finalJob);
+      } else if (finalJob.status === 'error') {
+        showError(finalJob.error_message || 'Marketing strategy edit failed.');
+      }
+    } catch (error) {
+      log.error({ err: error }, 'marketing strategy edit failed');
+      showError(error instanceof Error ? error.message : 'Marketing strategy edit failed.');
+    } finally {
+      setIsGeneratingMarketingStrategy(false);
+      setCurrentMarketingStrategyJob(null);
+    }
+  };
+
   const handleMarketingStrategyGeneration = async (signal: StudioSignal) => {
     const sourceId = signal.sources[0]?.source_id;
     if (!sourceId) {
@@ -126,6 +173,7 @@ export const useMarketingStrategyGeneration = (projectId: string) => {
     setViewingMarketingStrategyJob,
     loadSavedJobs,
     handleMarketingStrategyGeneration,
+    handleMarketingStrategyEdit,
     downloadMarketingStrategy,
   };
 };

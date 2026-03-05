@@ -21,6 +21,7 @@ export const PRDSection: React.FC = () => {
     setViewingPRDJob,
     loadSavedJobs,
     handlePRDGeneration,
+    handlePRDEdit,
     downloadPRD,
   } = usePRDGeneration(projectId);
 
@@ -65,6 +66,9 @@ export const PRDSection: React.FC = () => {
         viewingPRDJob={viewingPRDJob}
         onClose={() => setViewingPRDJob(null)}
         onDownload={downloadPRD}
+        onEdit={(instructions) =>
+          viewingPRDJob && handlePRDEdit(viewingPRDJob, instructions)
+        }
       />
     </>
   );

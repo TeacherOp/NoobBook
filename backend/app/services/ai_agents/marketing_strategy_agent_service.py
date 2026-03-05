@@ -9,7 +9,7 @@ Orchestrates the marketing strategy generation workflow:
 
 import logging
 import uuid
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from app.services.integrations.claude import claude_service
@@ -48,7 +48,9 @@ class MarketingStrategyAgentService:
         project_id: str,
         source_id: str,
         job_id: str,
-        direction: str = ""
+        direction: str = "",
+        previous_document: Optional[Dict] = None,
+        edit_instructions: Optional[str] = None
     ) -> Dict[str, Any]:
         """Run the agent to generate a marketing strategy document."""
         config = self._load_config()
@@ -65,15 +67,33 @@ class MarketingStrategyAgentService:
             started_at=started_at
         )
 
-        # Get source content using shared utility
-        source_content = get_source_content(project_id, source_id, max_chars=15000)
+        # Get source content (if source provided)
+        source_content = ""
+        if source_id:
+            source_content = get_source_content(project_id, source_id, max_chars=15000)
 
-        # Build user message from config
+        # Build user message from config or direction-only fallback
         effective_direction = direction if direction else config.get("default_direction", "")
-        user_message = config.get("user_message", "").format(
-            source_content=source_content,
-            direction=effective_direction
-        )
+        if source_content and not source_content.startswith("Error"):
+            user_message = config.get("user_message", "").format(
+                source_content=source_content,
+                direction=effective_direction
+            )
+        else:
+            user_message = f"Create a comprehensive Marketing Strategy Document.\n\nDirection from user: {effective_direction}\n\nPlease create a complete marketing strategy following the workflow:\n1. First, plan the document structure using the plan_marketing_strategy tool\n2. Then write each section one at a time using the write_marketing_section tool\n3. Set is_last_section=true when you write the final section"
+
+        # Edit mode: include previous document for refinement
+        if previous_document and edit_instructions:
+            edit_context = "\n\n## EDIT MODE — REFINE PREVIOUS DOCUMENT\n"
+            edit_context += f"Previous document title: {previous_document.get('document_title', 'N/A')}\n"
+            edit_context += f"Previous sections: {previous_document.get('sections_written', 0)}\n"
+            edit_context += "\n### PREVIOUS DOCUMENT CONTENT:\n"
+            edit_context += previous_document.get('markdown_content', '')
+            edit_context += f"\n\n### EDIT INSTRUCTIONS:\n{edit_instructions}\n"
+            edit_context += "Rewrite the document applying the edit instructions. Preserve sections and content the user didn't ask to change. Focus modifications on what the edit instructions specify."
+            user_message = user_message + edit_context
+        elif edit_instructions:
+            user_message = user_message + f"\n\nADDITIONAL INSTRUCTIONS: {edit_instructions}"
 
         messages = [{"role": "user", "content": user_message}]
 

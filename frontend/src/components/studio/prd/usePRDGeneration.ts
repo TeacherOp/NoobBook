@@ -64,6 +64,53 @@ export const usePRDGeneration = (projectId: string) => {
     }
   };
 
+  const handlePRDEdit = async (parentJob: PRDJob, editInstructions: string) => {
+    setIsGeneratingPRD(true);
+    setCurrentPRDJob(null);
+
+    try {
+      const startResponse = await prdsAPI.startGeneration(
+        projectId,
+        parentJob.source_id,
+        parentJob.direction,
+        parentJob.id,
+        editInstructions
+      );
+
+      if (!startResponse.success || !startResponse.job_id) {
+        showError(startResponse.error || 'Failed to start PRD edit.');
+        setIsGeneratingPRD(false);
+        return;
+      }
+
+      // Close modal only after edit confirmed started
+      setViewingPRDJob(null);
+      showSuccess('Editing PRD document...');
+
+      const finalJob = await prdsAPI.pollJobStatus(
+        projectId,
+        startResponse.job_id,
+        (job) => setCurrentPRDJob(job)
+      );
+
+      setCurrentPRDJob(finalJob);
+
+      if (finalJob.status === 'ready') {
+        showSuccess(`PRD updated: ${finalJob.document_title || 'PRD'}`);
+        setSavedPRDJobs((prev) => [finalJob, ...prev]);
+        setViewingPRDJob(finalJob);
+      } else if (finalJob.status === 'error') {
+        showError(finalJob.error_message || 'PRD edit failed.');
+      }
+    } catch (error) {
+      log.error({ err: error }, 'PRD edit failed');
+      showError(error instanceof Error ? error.message : 'PRD edit failed.');
+    } finally {
+      setIsGeneratingPRD(false);
+      setCurrentPRDJob(null);
+    }
+  };
+
   const handlePRDGeneration = async (signal: StudioSignal) => {
     const sourceId = signal.sources[0]?.source_id;
     if (!sourceId) {
@@ -126,6 +173,7 @@ export const usePRDGeneration = (projectId: string) => {
     setViewingPRDJob,
     loadSavedJobs,
     handlePRDGeneration,
+    handlePRDEdit,
     downloadPRD,
   };
 };

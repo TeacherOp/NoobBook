@@ -21,6 +21,7 @@ export const MarketingStrategySection: React.FC = () => {
     setViewingMarketingStrategyJob,
     loadSavedJobs,
     handleMarketingStrategyGeneration,
+    handleMarketingStrategyEdit,
     downloadMarketingStrategy,
   } = useMarketingStrategyGeneration(projectId);
 
@@ -65,6 +66,9 @@ export const MarketingStrategySection: React.FC = () => {
         viewingMarketingStrategyJob={viewingMarketingStrategyJob}
         onClose={() => setViewingMarketingStrategyJob(null)}
         onDownload={downloadMarketingStrategy}
+        onEdit={(instructions) =>
+          viewingMarketingStrategyJob && handleMarketingStrategyEdit(viewingMarketingStrategyJob, instructions)
+        }
       />
     </>
   );

@@ -109,15 +109,21 @@ export const marketingStrategiesAPI = {
   async startGeneration(
     projectId: string,
     sourceId: string,
-    direction?: string
+    direction?: string,
+    parentJobId?: string,
+    editInstructions?: string
   ): Promise<StartMarketingStrategyResponse> {
     try {
+      const body: Record<string, string> = {
+        source_id: sourceId,
+        direction: direction || 'Create a comprehensive marketing strategy covering all relevant aspects.',
+      };
+      if (parentJobId) body.parent_job_id = parentJobId;
+      if (editInstructions) body.edit_instructions = editInstructions;
+
       const response = await axios.post(
         `${API_BASE_URL}/projects/${projectId}/studio/marketing-strategy`,
-        {
-          source_id: sourceId,
-          direction: direction || 'Create a comprehensive marketing strategy covering all relevant aspects.',
-        }
+        body
       );
       return response.data;
     } catch (error) {

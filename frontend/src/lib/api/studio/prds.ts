@@ -109,15 +109,21 @@ export const prdsAPI = {
   async startGeneration(
     projectId: string,
     sourceId: string,
-    direction?: string
+    direction?: string,
+    parentJobId?: string,
+    editInstructions?: string
   ): Promise<StartPRDResponse> {
     try {
+      const body: Record<string, string> = {
+        source_id: sourceId,
+        direction: direction || 'Create a comprehensive PRD covering all relevant product requirements.',
+      };
+      if (parentJobId) body.parent_job_id = parentJobId;
+      if (editInstructions) body.edit_instructions = editInstructions;
+
       const response = await axios.post(
         `${API_BASE_URL}/projects/${projectId}/studio/prd`,
-        {
-          source_id: sourceId,
-          direction: direction || 'Create a comprehensive PRD covering all relevant product requirements.',
-        }
+        body
       );
       return response.data;
     } catch (error) {

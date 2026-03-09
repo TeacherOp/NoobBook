@@ -86,7 +86,7 @@ class DatabaseAnalyzerAgent:
         # BEFORE entering the expensive agent loop. This prevents wasting
         # API calls when the connection is missing or inaccessible.
         try:
-            conn, resolved = executor._get_connection(project_id, source_id)
+            resolved = executor.validate_connection(project_id, source_id)
             logger.info(
                 "DB agent pre-flight OK: connection_id=%s, db_type=%s, source_id=%s",
                 resolved.connection_id, resolved.db_type, source_id,

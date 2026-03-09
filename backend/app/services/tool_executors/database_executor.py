@@ -252,6 +252,11 @@ class DatabaseExecutor:
         self._conn_type_cache[resolved.connection_id] = resolved.db_type
         return conn, resolved
 
+    def validate_connection(self, project_id: str, source_id: str) -> _ResolvedConnection:
+        """Pre-flight: verify the DB connection is resolvable. Caches for reuse."""
+        _, resolved = self._get_connection(project_id, source_id)
+        return resolved
+
     @staticmethod
     def _connect(db_type: str, connection_uri: str) -> Any:
         # Parse the URI to extract host for logging (never log passwords)

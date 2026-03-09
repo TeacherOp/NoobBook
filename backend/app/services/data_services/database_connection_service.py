@@ -12,6 +12,7 @@ Security note:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse, urlunparse
@@ -20,6 +21,8 @@ import psycopg2
 import pymysql
 
 from app.services.integrations.supabase import get_supabase, is_supabase_enabled
+
+logger = logging.getLogger(__name__)
 
 
 # Default user ID for single-user mode (matches backend/supabase/init.sql)
@@ -197,26 +200,56 @@ class DatabaseConnectionService:
         connection_id: str,
         user_id: str = DEFAULT_USER_ID,
         include_secret: bool = False,
+        _server_internal: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """
         Get a single connection.
 
-        If include_secret=False, the connection URI is masked.
+        Args:
+            connection_id: The connection UUID
+            user_id: Requesting user's ID (for access control)
+            include_secret: If True, return the raw row with connection_uri
+            _server_internal: If True, skip user-level access control.
+                Only used by server-side code (processor, executor) that
+                already runs with the service key.
         """
-        resp = (
-            self.supabase.table(self.TABLE)
-            .select("*")
-            .eq("id", connection_id)
-            .execute()
-        )
+        if not connection_id:
+            logger.warning("get_connection called with empty connection_id")
+            return None
+
+        try:
+            resp = (
+                self.supabase.table(self.TABLE)
+                .select("*")
+                .eq("id", connection_id)
+                .execute()
+            )
+        except Exception as e:
+            logger.error(
+                "Supabase query failed for connection_id=%s: %s",
+                connection_id, e,
+            )
+            return None
+
         if not resp.data:
+            logger.warning(
+                "Connection not found in database: connection_id=%s",
+                connection_id,
+            )
             return None
 
         row = resp.data[0]
 
-        # Access control: visible_to_all grants usage access (credentials used
-        # server-side only, never exposed to the frontend). Shared connections
-        # also grant full usage access.
+        # Server-internal calls skip access control. These are made by
+        # database_processor and database_executor which run server-side
+        # with the service key. The source was already authorized at
+        # upload time; re-checking here is redundant and causes failures
+        # when the project owner differs from the connection owner
+        # (multi-user mode).
+        if _server_internal:
+            return row
+
+        # User-facing access control: owner, visible_to_all, or shared.
         if row.get("owner_user_id") != user_id:
             if row.get("visible_to_all"):
                 pass  # Allow access for connections visible to all users
@@ -229,6 +262,14 @@ class DatabaseConnectionService:
                     .execute()
                 )
                 if not (shared.data or []):
+                    logger.warning(
+                        "Access denied for connection_id=%s: "
+                        "owner=%s, requester=%s, visible_to_all=%s, shared=False",
+                        connection_id,
+                        row.get("owner_user_id"),
+                        user_id,
+                        row.get("visible_to_all"),
+                    )
                     return None
 
         if include_secret:

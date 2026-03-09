@@ -11,6 +11,7 @@ It uses tool-calling to:
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List
@@ -20,6 +21,8 @@ from app.config import prompt_loader, tool_loader
 from app.services.data_services import message_service
 from app.services.tool_executors.database_executor import DatabaseExecutor
 from app.utils import claude_parsing_utils
+
+logger = logging.getLogger(__name__)
 
 
 class DatabaseAnalyzerAgent:
@@ -79,6 +82,45 @@ class DatabaseAnalyzerAgent:
 
         executor = DatabaseExecutor()
 
+        # Pre-flight check: verify the database connection is resolvable
+        # BEFORE entering the expensive agent loop. This prevents wasting
+        # API calls when the connection is missing or inaccessible.
+        try:
+            conn, resolved = executor._get_connection(project_id, source_id)
+            logger.info(
+                "DB agent pre-flight OK: connection_id=%s, db_type=%s, source_id=%s",
+                resolved.connection_id, resolved.db_type, source_id,
+            )
+        except Exception as e:
+            logger.error(
+                "DB agent pre-flight FAILED for source_id=%s: %s",
+                source_id, e,
+            )
+            error_result = {
+                "success": False,
+                "error": (
+                    f"Cannot connect to database: {e}. "
+                    f"Please verify the connection in Settings → Databases is still active "
+                    f"and accessible from the server."
+                ),
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+            }
+            self._save_execution(
+                project_id=project_id,
+                execution_id=execution_id,
+                query=query,
+                messages=messages,
+                result=error_result,
+                started_at=started_at,
+                source_id=source_id,
+            )
+            return error_result
+
+        # Track consecutive tool errors to bail out early instead of
+        # burning through all MAX_ITERATIONS on repeated failures.
+        consecutive_errors = 0
+        MAX_CONSECUTIVE_ERRORS = 3
+
         try:
             for iteration in range(1, self.MAX_ITERATIONS + 1):
                 response = claude_service.send_message(
@@ -105,6 +147,7 @@ class DatabaseAnalyzerAgent:
                     continue
 
                 tool_results_data = []
+                iteration_had_error = False
 
                 for tool_block in tool_blocks:
                     tool_name = tool_block.get("name")
@@ -117,6 +160,10 @@ class DatabaseAnalyzerAgent:
 
                     if tool_name == "query_runner" and isinstance(tool_input.get("query"), str):
                         executed_queries.append(tool_input["query"])
+
+                    # Track errors for early bail-out
+                    if isinstance(result, dict) and not result.get("success", True):
+                        iteration_had_error = True
 
                     if is_termination:
                         # Ensure we preserve executed queries for debugging.
@@ -151,6 +198,37 @@ class DatabaseAnalyzerAgent:
                 if tool_results_data:
                     tool_results_content = claude_parsing_utils.build_tool_result_content(tool_results_data)
                     messages.append({"role": "user", "content": tool_results_content})
+
+                # Early bail-out: if we get the same type of error repeatedly,
+                # stop wasting API calls and return immediately.
+                if iteration_had_error:
+                    consecutive_errors += 1
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        logger.warning(
+                            "DB agent: %d consecutive tool errors, bailing out early "
+                            "(source_id=%s, iteration=%d)",
+                            consecutive_errors, source_id, iteration,
+                        )
+                        error_result = {
+                            "success": False,
+                            "error": (
+                                f"Database query failed after {consecutive_errors} consecutive errors. "
+                                f"The database may be unreachable or the connection may have expired."
+                            ),
+                            "usage": {"input_tokens": total_input_tokens, "output_tokens": total_output_tokens},
+                        }
+                        self._save_execution(
+                            project_id=project_id,
+                            execution_id=execution_id,
+                            query=query,
+                            messages=messages,
+                            result=error_result,
+                            started_at=started_at,
+                            source_id=source_id,
+                        )
+                        return error_result
+                else:
+                    consecutive_errors = 0
 
             error_result = {
                 "success": False,

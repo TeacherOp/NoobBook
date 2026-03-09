@@ -29,7 +29,6 @@ import pymysql
 from app.services.ai_services.embedding_service import embedding_service
 from app.services.ai_services.summary_service import summary_service
 from app.services.data_services.database_connection_service import database_connection_service
-from app.services.data_services import project_service
 from app.services.integrations.supabase import storage_service
 
 
@@ -208,30 +207,31 @@ def process_database(
         )
         return {"success": False, "error": "Missing connection_id"}
 
-    # Load connection secret from account-level table
-    owner_user_id = project_service.get_project_owner_id(project_id)
-    if not owner_user_id:
-        source_service.update_source(
-            project_id,
-            source_id,
-            status="error",
-            processing_info={"error": "Project owner not found"},
-        )
-        return {"success": False, "error": "Project owner not found"}
-
+    # Load connection secret from account-level table.
+    # Uses _server_internal=True to skip user-level access control —
+    # the source was already authorized at upload time.
+    logger.info(
+        "DB processor: resolving connection_id=%s (source_id=%s)",
+        connection_id, source_id,
+    )
     connection = database_connection_service.get_connection(
         connection_id=connection_id,
-        user_id=owner_user_id,
         include_secret=True,
+        _server_internal=True,
     )
     if not connection:
+        error_msg = (
+            f"Database connection not found (connection_id={connection_id}). "
+            f"Verify the connection exists in Settings → Databases."
+        )
+        logger.error("DB processor: %s", error_msg)
         source_service.update_source(
             project_id,
             source_id,
             status="error",
-            processing_info={"error": "Database connection not found (or not accessible)"},
+            processing_info={"error": error_msg},
         )
-        return {"success": False, "error": "Database connection not found"}
+        return {"success": False, "error": error_msg}
 
     db_type = (connection.get("db_type") or "postgresql").lower()
     connection_uri = connection.get("connection_uri") or ""

@@ -13,6 +13,7 @@ Security:
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from dataclasses import dataclass
@@ -24,8 +25,9 @@ from psycopg2.extras import RealDictCursor
 import pymysql
 
 from app.services.data_services.database_connection_service import database_connection_service
-from app.services.data_services import project_service
 from app.services.source_services import source_service
+
+logger = logging.getLogger(__name__)
 
 
 MAX_QUERY_ROWS = 100
@@ -153,36 +155,68 @@ class DatabaseExecutor:
     # ---------------------------------------------------------------------
 
     def _resolve_connection(self, project_id: str, source_id: str) -> _ResolvedConnection:
+        # Step 1: Load the source record from Supabase
         source = source_service.get_source(project_id, source_id)
         if not source:
-            raise ValueError("Source not found")
+            logger.error(
+                "DB resolve: source not found — project_id=%s, source_id=%s",
+                project_id, source_id,
+            )
+            raise ValueError(
+                f"Source not found (project_id={project_id}, source_id={source_id})"
+            )
 
+        # Step 2: Verify this is a DATABASE source
         embedding_info = source.get("embedding_info", {}) or {}
         file_extension = (embedding_info.get("file_extension") or "").lower()
         if file_extension != ".database":
-            raise ValueError("Source is not a DATABASE source")
+            raise ValueError(
+                f"Source is not a DATABASE source (file_extension={file_extension})"
+            )
 
+        # Step 3: Extract connection_id from embedding_info
         connection_id = embedding_info.get("connection_id")
         if not connection_id:
-            raise ValueError("Database source missing connection_id")
+            logger.error(
+                "DB resolve: connection_id missing in embedding_info — "
+                "source_id=%s, embedding_info_keys=%s",
+                source_id, list(embedding_info.keys()),
+            )
+            raise ValueError(
+                f"Database source missing connection_id in embedding_info "
+                f"(source_id={source_id})"
+            )
 
-        owner_user_id = project_service.get_project_owner_id(project_id)
-        if not owner_user_id:
-            raise ValueError("Project owner not found")
-
+        # Step 4: Load the connection record (with credentials)
+        # Uses _server_internal=True to skip user-level access control.
+        # The source was already authorized at upload time.
         connection = database_connection_service.get_connection(
             connection_id=connection_id,
-            user_id=owner_user_id,
             include_secret=True,
+            _server_internal=True,
         )
         if not connection:
-            raise ValueError("Database connection not found (or not accessible)")
+            logger.error(
+                "DB resolve: connection not found — "
+                "connection_id=%s, source_id=%s. "
+                "The connection may have been deleted.",
+                connection_id, source_id,
+            )
+            raise ValueError(
+                f"Database connection not found (connection_id={connection_id}). "
+                f"Check that the connection still exists in Settings → Databases."
+            )
 
         db_type = (connection.get("db_type") or "postgresql").lower()
         connection_uri = connection.get("connection_uri") or ""
 
         if db_type not in {"postgresql", "mysql"}:
-            raise ValueError("Unsupported db_type (expected postgresql or mysql)")
+            raise ValueError(f"Unsupported db_type: {db_type}")
+
+        if not connection_uri:
+            raise ValueError(
+                f"Connection has empty connection_uri (connection_id={connection_id})"
+            )
 
         return _ResolvedConnection(
             connection_id=connection_id,
@@ -220,32 +254,46 @@ class DatabaseExecutor:
 
     @staticmethod
     def _connect(db_type: str, connection_uri: str) -> Any:
-        if db_type == "mysql":
-            parsed = urlparse(connection_uri)
-            if not parsed.hostname:
-                raise ValueError("Invalid MySQL connection URI")
+        # Parse the URI to extract host for logging (never log passwords)
+        parsed_for_log = urlparse(connection_uri)
+        host_for_log = f"{parsed_for_log.hostname}:{parsed_for_log.port or 'default'}"
 
-            return pymysql.connect(
-                host=parsed.hostname,
-                port=parsed.port or 3306,
-                user=parsed.username,
-                password=parsed.password,
-                database=(parsed.path or "").lstrip("/") or None,
-                connect_timeout=5,
-                read_timeout=30,
-                write_timeout=30,
-                autocommit=True,
-                charset="utf8mb4",
-                cursorclass=pymysql.cursors.DictCursor,
-            )
-
-        conn = psycopg2.connect(connection_uri, connect_timeout=5)
-        # Try to enforce read-only where possible.
         try:
-            conn.set_session(readonly=True, autocommit=True)
-        except Exception:
-            conn.autocommit = True
-        return conn
+            if db_type == "mysql":
+                parsed = urlparse(connection_uri)
+                if not parsed.hostname:
+                    raise ValueError("Invalid MySQL connection URI — no hostname")
+
+                return pymysql.connect(
+                    host=parsed.hostname,
+                    port=parsed.port or 3306,
+                    user=parsed.username,
+                    password=parsed.password,
+                    database=(parsed.path or "").lstrip("/") or None,
+                    connect_timeout=10,
+                    read_timeout=30,
+                    write_timeout=30,
+                    autocommit=True,
+                    charset="utf8mb4",
+                    cursorclass=pymysql.cursors.DictCursor,
+                )
+
+            conn = psycopg2.connect(connection_uri, connect_timeout=10)
+            # Try to enforce read-only where possible.
+            try:
+                conn.set_session(readonly=True, autocommit=True)
+            except Exception:
+                conn.autocommit = True
+            return conn
+
+        except Exception as e:
+            logger.error(
+                "Failed to connect to %s database at %s: %s",
+                db_type, host_for_log, e,
+            )
+            raise ValueError(
+                f"Cannot connect to {db_type} database at {host_for_log}: {e}"
+            ) from e
 
     # ---------------------------------------------------------------------
     # Tools
@@ -270,6 +318,7 @@ class DatabaseExecutor:
             return self._postgres_table_details(conn, table_names)
 
         except Exception as e:
+            logger.error("schema_fetcher failed (source_id=%s): %s", source_id, e)
             return {"success": False, "error": str(e)}
 
     def _query_runner(self, tool_input: Dict[str, Any], project_id: str, source_id: str) -> Dict[str, Any]:
@@ -326,6 +375,7 @@ class DatabaseExecutor:
             }
 
         except Exception as e:
+            logger.error("query_runner failed (source_id=%s): %s", source_id, e)
             return {"success": False, "error": f"Query execution failed: {str(e)}", "query": normalized}
 
     # ---------------------------------------------------------------------

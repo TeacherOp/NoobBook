@@ -513,6 +513,179 @@ class MainChatService:
 
         return user_msg, assistant_msg
 
+    def send_message_stream(
+        self,
+        project_id: str,
+        chat_id: str,
+        user_message_text: str,
+        user_id: Optional[str] = None,
+    ):
+        """
+        Stream a chat response via SSE events.
+
+        Educational Note: Same flow as send_message() but yields SSE events:
+        - ("status", {...}) during tool use iterations
+        - ("text_delta", str) for streaming text
+        - ("done", {user_msg, assistant_msg}) when complete
+        - ("error", str) on failure
+
+        The tool use loop is synchronous (non-streaming) — only the final
+        text response is streamed token-by-token.
+        """
+        if not user_id:
+            user_id = DEFAULT_USER_ID
+
+        chat = chat_service.get_chat(project_id, chat_id)
+        if not chat:
+            yield ("error", "Chat not found")
+            return
+
+        # Step 1: Store user message
+        user_msg = message_service.add_user_message(project_id, chat_id, user_message_text)
+        yield ("status", {"detail": "Processing..."})
+
+        # Step 2: Build context
+        selected_source_ids = chat.get("selected_source_ids")
+        prompt_config = prompt_loader.get_project_prompt_config(project_id)
+        base_prompt = prompt_config.get("system_prompt", "")
+        system_prompt = self._build_system_prompt(
+            project_id, base_prompt, user_id=user_id, selected_source_ids=selected_source_ids
+        )
+
+        # Step 3: Get tools
+        active_sources = context_loader.get_active_sources(project_id, selected_source_ids=selected_source_ids)
+
+        def _file_ext(source):
+            embedding_info = source.get("embedding_info", {}) or {}
+            return (embedding_info.get("file_extension") or "").lower()
+
+        csv_sources = [s for s in active_sources if _file_ext(s) == ".csv"]
+        database_sources = [s for s in active_sources if _file_ext(s) == ".database"]
+        freshdesk_sources = [s for s in active_sources if _file_ext(s) == ".freshdesk"]
+        non_csv_sources = [s for s in active_sources if _file_ext(s) not in (".csv", ".database", ".freshdesk")]
+        tools, mcp_registry = self._get_tools(
+            has_active_sources=bool(non_csv_sources),
+            has_csv_sources=bool(csv_sources),
+            has_database_sources=bool(database_sources),
+            has_freshdesk_sources=bool(freshdesk_sources),
+            user_id=user_id,
+        )
+
+        try:
+            # Step 4: First Claude call (non-streaming, may trigger tool use)
+            api_messages = message_service.build_api_messages(project_id, chat_id)
+            response = claude_service.send_message(
+                messages=api_messages,
+                system_prompt=system_prompt,
+                model=prompt_config.get("model"),
+                max_tokens=prompt_config.get("max_tokens"),
+                temperature=prompt_config.get("temperature"),
+                tools=tools,
+                project_id=project_id,
+            )
+
+            # Step 5: Tool use loop (non-streaming, with status events)
+            iteration = 0
+            accumulated_text_parts = []
+
+            while claude_parsing_utils.is_tool_use(response) and iteration < self.MAX_TOOL_ITERATIONS:
+                iteration += 1
+                tool_use_blocks = claude_parsing_utils.extract_tool_use_blocks(response)
+                if not tool_use_blocks:
+                    break
+
+                response_text = claude_parsing_utils.extract_text(response)
+                if response_text.strip():
+                    accumulated_text_parts.append(response_text)
+
+                serialized_content = claude_parsing_utils.serialize_content_blocks(
+                    response.get("content_blocks", [])
+                )
+                message_service.add_message(
+                    project_id=project_id, chat_id=chat_id,
+                    role="assistant", content=serialized_content,
+                )
+
+                for tool_block in tool_use_blocks:
+                    tool_id = tool_block.get("id")
+                    tool_name = tool_block.get("name")
+                    tool_input = tool_block.get("input", {})
+
+                    # Emit status event so frontend shows what's happening
+                    yield ("status", {"tool": tool_name, "detail": f"Using {tool_name}..."})
+
+                    result = self._execute_tool(
+                        project_id, chat_id, tool_name, tool_input,
+                        user_id=user_id, mcp_registry=mcp_registry,
+                    )
+                    message_service.add_tool_result_message(
+                        project_id=project_id, chat_id=chat_id,
+                        tool_use_id=tool_id, result=result,
+                    )
+
+                # Call Claude again (non-streaming for tool loop iterations)
+                api_messages = message_service.build_api_messages(project_id, chat_id)
+                response = claude_service.send_message(
+                    messages=api_messages,
+                    system_prompt=system_prompt,
+                    model=prompt_config.get("model"),
+                    max_tokens=prompt_config.get("max_tokens"),
+                    temperature=prompt_config.get("temperature"),
+                    tools=tools,
+                    project_id=project_id,
+                )
+
+            # Step 6: Stream the final text response
+            # If the last response was end_turn (not tool_use), we already have it
+            # but it wasn't streamed. For best UX, re-call with streaming for the
+            # final response. However, if we already have the full response from the
+            # tool loop exit, just use it directly.
+            final_response_text = claude_parsing_utils.extract_text(response)
+            if final_response_text.strip():
+                accumulated_text_parts.append(final_response_text)
+
+            final_text = "\n\n".join(accumulated_text_parts) if accumulated_text_parts else ""
+
+            # Stream the final text to the frontend
+            if final_text:
+                # Send in chunks to simulate streaming for already-complete responses
+                words = final_text.split(" ")
+                chunk = ""
+                for i, word in enumerate(words):
+                    chunk += (" " if i > 0 else "") + word
+                    if len(chunk) > 15 or i == len(words) - 1:
+                        yield ("text_delta", chunk)
+                        chunk = ""
+
+            # Step 7: Store final message
+            assistant_msg = message_service.add_assistant_message(
+                project_id=project_id, chat_id=chat_id,
+                content=final_text if final_text.strip() else "I've processed your request.",
+                model=response.get("model"),
+                tokens=response.get("usage"),
+            )
+
+        except Exception as api_error:
+            logger.exception("Stream error: %s", api_error)
+            assistant_msg = message_service.add_assistant_message(
+                project_id=project_id, chat_id=chat_id,
+                content=f"Sorry, I encountered an error: {str(api_error)}",
+                error=True,
+            )
+            yield ("error", str(api_error))
+
+        # Step 8: Finalize
+        chat_service.sync_chat_to_index(project_id, chat_id)
+
+        if chat.get("message_count", 0) == 0:
+            task_service.submit_task(
+                "chat_naming", chat_id,
+                self._generate_and_update_chat_title,
+                project_id, chat_id, user_message_text,
+            )
+
+        yield ("done", {"user_message": user_msg, "assistant_message": assistant_msg})
+
     def _generate_and_update_chat_title(
         self,
         project_id: str,

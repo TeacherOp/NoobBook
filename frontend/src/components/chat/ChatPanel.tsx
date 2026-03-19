@@ -213,34 +213,65 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       };
     });
 
-    try {
-      const result = await chatsAPI.sendMessage(projectId, activeChat.id, userMessage, controller.signal);
+    // Add a temporary streaming assistant message
+    const tempAssistantId = `streaming-${Date.now()}`;
+    const tempAssistantMessage = {
+      id: tempAssistantId,
+      role: 'assistant' as const,
+      content: '',
+      timestamp: new Date().toISOString(),
+    };
 
-      // Replace temp message with real messages from API
+    setActiveChat((prev) => {
+      if (!prev) return null;
+      return { ...prev, messages: [...prev.messages, tempAssistantMessage] };
+    });
+
+    try {
+      const chatId = activeChat.id;
+
+      const result = await chatsAPI.sendMessageStream(
+        projectId,
+        chatId,
+        userMessage,
+        (type, data) => {
+          if (type === 'text_delta') {
+            // Append text chunk to the streaming assistant message
+            const chunk = (data as { content?: string }).content || '';
+            setActiveChat((prev) => {
+              if (!prev) return null;
+              return {
+                ...prev,
+                messages: prev.messages.map((m) =>
+                  m.id === tempAssistantId
+                    ? { ...m, content: m.content + chunk }
+                    : m
+                ),
+              };
+            });
+          }
+          // status events are visible in ActiveTasksBar already
+        },
+        controller.signal,
+      );
+
+      // Replace both temp messages with final stored messages from backend
       setActiveChat((prev) => {
         if (!prev) return null;
-        // Remove the temp message and add real user + assistant messages
-        const messagesWithoutTemp = prev.messages.filter((m) => m.id !== tempUserMessage.id);
+        const cleaned = prev.messages.filter(
+          (m) => m.id !== tempUserMessage.id && m.id !== tempAssistantId
+        );
         return {
           ...prev,
-          messages: [...messagesWithoutTemp, result.user_message, result.assistant_message],
+          messages: [...cleaned, result.user_message, result.assistant_message],
           updated_at: new Date().toISOString(),
         };
       });
 
-      // Update the chat metadata in the list
       await loadChats();
-
-      // Trigger cost refresh in header
       onCostsChange?.();
 
-      // Fetch updated chat after delay (background tasks may have updated title/signals)
-      // Educational Note: Studio signals are added in background tasks, so we
-      // need to refetch the chat to get them. We do this twice - once quickly
-      // for signals and once later for auto-generated title.
-      const chatId = activeChat.id;
-
-      // Quick fetch for signals (1 second delay)
+      // Fetch updated chat for signals and title
       setTimeout(async () => {
         try {
           const updatedChat = await chatsAPI.getChat(projectId, chatId);
@@ -248,12 +279,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             ? { ...prev, studio_signals: updatedChat.studio_signals || [] }
             : prev
           );
-        } catch {
-          // Silently ignore - signal update is non-critical
-        }
+        } catch { /* non-critical */ }
       }, 1000);
 
-      // Delayed fetch for title (4 second delay)
       setTimeout(async () => {
         try {
           const updatedChat = await chatsAPI.getChat(projectId, chatId);
@@ -261,29 +289,27 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             ? { ...prev, title: updatedChat.title, studio_signals: updatedChat.studio_signals || [] }
             : prev
           );
-          // Also update in chat list
           setAllChats(prev => prev.map(c =>
             c.id === chatId ? { ...c, title: updatedChat.title } : c
           ));
-        } catch {
-          // Silently ignore - title update is non-critical
-        }
+        } catch { /* non-critical */ }
       }, 4000);
     } catch (err) {
-      // Don't show error toast if user intentionally stopped
-      const isAborted = err instanceof Error && err.name === 'CanceledError';
+      const isAborted = err instanceof Error && (err.name === 'CanceledError' || err.name === 'AbortError');
       if (isAborted) {
         log.info('Chat request stopped by user');
       } else {
         log.error({ err }, 'failed to send message');
         error('Failed to send message');
       }
-      // Remove the optimistic message on error/abort
+      // Remove both temp messages on error/abort
       setActiveChat((prev) => {
         if (!prev) return null;
         return {
           ...prev,
-          messages: prev.messages.filter((m) => m.id !== tempUserMessage.id),
+          messages: prev.messages.filter(
+            (m) => m.id !== tempUserMessage.id && m.id !== tempAssistantId
+          ),
         };
       });
     } finally {

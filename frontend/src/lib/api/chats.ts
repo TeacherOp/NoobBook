@@ -8,6 +8,7 @@
 import axios from 'axios';
 import type { StudioSignal } from '../../components/studio/types';
 import { API_BASE_URL } from './client';
+import { getAccessToken } from '@/lib/auth/session';
 import { createLogger } from '@/lib/logger';
 
 const log = createLogger('chats-api');
@@ -197,6 +198,68 @@ class ChatsAPI {
       log.error({ err: error }, 'failed to send message');
       throw error;
     }
+  }
+
+  /**
+   * Send a message with streaming response via SSE.
+   * Educational Note: Uses fetch (not axios) because axios doesn't support
+   * streaming SSE responses. Calls onEvent for each SSE event.
+   */
+  async sendMessageStream(
+    projectId: string,
+    chatId: string,
+    message: string,
+    onEvent: (type: string, data: Record<string, unknown>) => void,
+    signal?: AbortSignal
+  ): Promise<SendMessageResponse> {
+    const token = getAccessToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(
+      `${API_BASE_URL}/projects/${projectId}/chats/${chatId}/messages/stream`,
+      { method: 'POST', headers, body: JSON.stringify({ message }), signal }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Stream request failed: ${response.status}`);
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No response body');
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalResult: SendMessageResponse | null = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const parsed = JSON.parse(line.slice(6));
+          onEvent(parsed.type, parsed);
+
+          if (parsed.type === 'done') {
+            finalResult = {
+              user_message: parsed.user_message,
+              assistant_message: parsed.assistant_message,
+            };
+          }
+        } catch {
+          // Skip malformed SSE lines
+        }
+      }
+    }
+
+    if (!finalResult) throw new Error('Stream ended without done event');
+    return finalResult;
   }
 
   /**

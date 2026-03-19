@@ -144,6 +144,73 @@ class ClaudeService:
             "stop_reason": response.stop_reason,
         }
 
+    def send_message_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        system_prompt: Optional[str] = None,
+        model: str = "claude-sonnet-4-6",
+        max_tokens: int = 4096,
+        temperature: float = 0.0,
+        tools: Optional[List[Dict[str, Any]]] = None,
+        project_id: Optional[str] = None,
+    ):
+        """
+        Stream a Claude response, yielding text chunks as they arrive.
+
+        Educational Note: Uses the Anthropic streaming API to yield text
+        deltas in real-time. For tool_use responses, collects the full
+        response and yields it as a single dict (same format as send_message).
+
+        Yields:
+            Tuples of (event_type, data):
+            - ("text_delta", str) — incremental text chunk
+            - ("response", dict) — full response dict (for tool_use or when done)
+        """
+        client = self._get_client()
+
+        api_params = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": messages,
+        }
+
+        if system_prompt:
+            api_params["system"] = system_prompt
+        if temperature != 0.2:
+            api_params["temperature"] = temperature
+        if tools:
+            api_params["tools"] = tools
+
+        with client.messages.stream(**api_params) as stream:
+            for event in stream:
+                # Stream text deltas to the caller
+                if hasattr(event, 'type') and event.type == 'content_block_delta':
+                    if hasattr(event, 'delta') and hasattr(event.delta, 'text'):
+                        yield ("text_delta", event.delta.text)
+
+            # After streaming completes, get the final message for metadata
+            final = stream.get_final_message()
+
+        # Track costs
+        if project_id and final:
+            add_cost_usage(
+                project_id=project_id,
+                model=final.model,
+                input_tokens=final.usage.input_tokens,
+                output_tokens=final.usage.output_tokens,
+            )
+
+        # Yield the full response (same format as send_message) for storage/tool handling
+        yield ("response", {
+            "content_blocks": final.content,
+            "model": final.model,
+            "usage": {
+                "input_tokens": final.usage.input_tokens,
+                "output_tokens": final.usage.output_tokens,
+            },
+            "stop_reason": final.stop_reason,
+        })
+
     def count_tokens(
         self,
         messages: List[Dict[str, Any]],

@@ -25,7 +25,8 @@ the main_chat_service orchestrates:
 Routes:
 - POST /projects/<id>/chats/<id>/messages - Send message, get AI response
 """
-from flask import jsonify, request, current_app
+import json
+from flask import jsonify, request, current_app, Response
 from app.api.messages import messages_bp
 from app.services.chat_services import main_chat_service
 
@@ -91,3 +92,60 @@ def send_message(project_id, chat_id):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@messages_bp.route('/projects/<project_id>/chats/<chat_id>/messages/stream', methods=['POST'])
+def send_message_stream(project_id, chat_id):
+    """
+    Stream a chat response via Server-Sent Events.
+
+    Educational Note: Same logic as send_message but returns an SSE stream.
+    Events: status (tool use updates), text_delta (streaming text), done, error.
+    """
+    data = request.get_json()
+    if not data or 'message' not in data:
+        return jsonify({'success': False, 'error': 'Message is required'}), 400
+
+    user_message_text = data['message']
+    # Capture app and user identity before entering generator (runs outside request context)
+    app = current_app._get_current_object()
+    from app.services.auth.rbac import get_request_identity
+    try:
+        identity = get_request_identity()
+        user_id = identity.user_id if identity else None
+    except Exception:
+        user_id = None
+
+    def generate():
+        with app.app_context():
+            try:
+                for event_type, event_data in main_chat_service.send_message_stream(
+                    project_id=project_id,
+                    chat_id=chat_id,
+                    user_message_text=user_message_text,
+                    user_id=user_id,
+                ):
+                    payload = {"type": event_type}
+                    if event_type == "text_delta":
+                        payload["content"] = event_data
+                    elif event_type == "status":
+                        payload["content"] = event_data
+                    elif event_type == "done":
+                        payload["user_message"] = event_data.get("user_message")
+                        payload["assistant_message"] = event_data.get("assistant_message")
+                    elif event_type == "error":
+                        payload["content"] = event_data
+
+                    yield f"data: {json.dumps(payload)}\n\n"
+            except Exception as e:
+                app.logger.error(f"Stream error: {e}")
+                yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+
+    return Response(
+        generate(),
+        content_type='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no',
+        },
+    )

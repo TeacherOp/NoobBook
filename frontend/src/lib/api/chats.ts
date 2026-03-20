@@ -232,30 +232,45 @@ class ChatsAPI {
     let buffer = '';
     let finalResult: SendMessageResponse | null = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const parsed = JSON.parse(line.slice(6));
-          onEvent(parsed.type, parsed);
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const parsed = JSON.parse(line.slice(6));
 
-          if (parsed.type === 'done') {
-            finalResult = {
-              user_message: parsed.user_message,
-              assistant_message: parsed.assistant_message,
-            };
+            // Throw on server-side errors so the catch block shows the toast
+            if (parsed.type === 'error') {
+              throw new Error(parsed.content || 'Stream error');
+            }
+
+            onEvent(parsed.type, parsed);
+
+            if (parsed.type === 'done') {
+              finalResult = {
+                user_message: parsed.user_message,
+                assistant_message: parsed.assistant_message,
+              };
+            }
+          } catch (parseErr) {
+            if (parseErr instanceof Error && parseErr.message !== 'Stream error') {
+              // Skip malformed SSE lines, but re-throw actual errors
+              if (parseErr.message.startsWith('Stream')) throw parseErr;
+            } else {
+              throw parseErr;
+            }
           }
-        } catch {
-          // Skip malformed SSE lines
         }
       }
+    } finally {
+      reader.cancel();
     }
 
     if (!finalResult) throw new Error('Stream ended without done event');

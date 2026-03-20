@@ -243,29 +243,25 @@ class ChatsAPI {
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
+          let parsed: Record<string, unknown>;
           try {
-            const parsed = JSON.parse(line.slice(6));
+            parsed = JSON.parse(line.slice(6));
+          } catch {
+            continue; // Skip malformed SSE lines
+          }
 
-            // Throw on server-side errors so the catch block shows the toast
-            if (parsed.type === 'error') {
-              throw new Error(parsed.content || 'Stream error');
-            }
+          // Throw on server-side errors so the outer catch shows the toast
+          if (parsed.type === 'error') {
+            throw new Error((parsed.content as string) || 'Stream error');
+          }
 
-            onEvent(parsed.type, parsed);
+          onEvent(parsed.type as string, parsed);
 
-            if (parsed.type === 'done') {
-              finalResult = {
-                user_message: parsed.user_message,
-                assistant_message: parsed.assistant_message,
-              };
-            }
-          } catch (parseErr) {
-            if (parseErr instanceof Error && parseErr.message !== 'Stream error') {
-              // Skip malformed SSE lines, but re-throw actual errors
-              if (parseErr.message.startsWith('Stream')) throw parseErr;
-            } else {
-              throw parseErr;
-            }
+          if (parsed.type === 'done') {
+            finalResult = {
+              user_message: parsed.user_message as Message,
+              assistant_message: parsed.assistant_message as Message,
+            };
           }
         }
       }

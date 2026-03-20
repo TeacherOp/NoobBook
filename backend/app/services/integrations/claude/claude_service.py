@@ -176,8 +176,7 @@ class ClaudeService:
 
         if system_prompt:
             api_params["system"] = system_prompt
-        if temperature != 0.2:
-            api_params["temperature"] = temperature
+        api_params["temperature"] = temperature
         if tools:
             api_params["tools"] = tools
 

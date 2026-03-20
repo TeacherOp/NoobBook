@@ -655,8 +655,8 @@ class MainChatService:
             assistant_msg = message_service.add_assistant_message(
                 project_id=project_id, chat_id=chat_id,
                 content=final_text if final_text.strip() else "I've processed your request.",
-                model=response.get("model"),
-                tokens=response.get("usage"),
+                model=response.get("model") if response else None,
+                tokens=response.get("usage") if response else None,
             )
 
         except Exception as api_error:

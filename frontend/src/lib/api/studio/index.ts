@@ -13,7 +13,29 @@ import { createLogger } from '@/lib/logger';
 const log = createLogger('studio-api');
 
 // Shared types
-export type JobStatus = 'pending' | 'processing' | 'ready' | 'error';
+export type JobStatus = 'pending' | 'processing' | 'ready' | 'error' | 'cancelled';
+
+/**
+ * Cancel an in-flight studio job. The backend flips the job's status to
+ * "cancelled" and the active-tasks endpoint immediately stops listing it.
+ *
+ * Idempotent on the server side — re-issuing on an already-terminal job
+ * (ready/error/cancelled) returns 200 with `already_terminal: true`. The
+ * caller can therefore fire-and-forget without first checking state.
+ */
+export async function cancelStudioJob(
+  projectId: string,
+  jobId: string,
+): Promise<void> {
+  try {
+    await axios.post(
+      `${API_BASE_URL}/projects/${projectId}/studio/jobs/${jobId}/cancel`,
+    );
+  } catch (error) {
+    log.error({ err: error, jobId }, 'failed to cancel studio job');
+    throw error;
+  }
+}
 
 /**
  * Response for API status checks (TTS, Gemini, etc.)

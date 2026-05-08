@@ -80,6 +80,7 @@ from app.api.studio import marketing_strategies  # noqa: F401
 from app.api.studio import blogs  # noqa: F401
 from app.api.studio import business_reports  # noqa: F401
 from app.api.studio import job_groups  # noqa: F401
+from app.api.studio import job_actions  # noqa: F401
 
 # Educational Note: The noqa comments tell flake8 to ignore the
 # "imported but unused" warning. We import to register routes,

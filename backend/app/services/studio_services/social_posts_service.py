@@ -99,9 +99,6 @@ class SocialPostsService:
             started_at=datetime.now().isoformat()
         )
 
-        # Cancellation breakpoint #1: at worker start.
-        studio_index_service.raise_if_cancelled(project_id, job_id)
-
         # Step 1: Generate copy and image prompts with Claude
         content_result = self._generate_content(
             project_id=project_id,
@@ -155,10 +152,6 @@ class SocialPostsService:
         all_posts = []
 
         for i, post_data in enumerate(posts_data):
-            # Cancellation breakpoint inside the per-platform image-gen
-            # loop. Each iteration is one Imagen call.
-            studio_index_service.raise_if_cancelled(project_id, job_id)
-
             platform = post_data.get("platform", f"platform_{i+1}")
             image_prompt = shared_image_prompt
             aspect_ratio = PLATFORM_ASPECT_RATIOS.get(platform, "1:1")

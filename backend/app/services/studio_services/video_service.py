@@ -62,10 +62,6 @@ class VideoService:
             status_message="Generating video prompt with Claude..."
         )
 
-        # Cancellation breakpoint #1: at the top, before the Claude
-        # prompt-generation call. Bails before any token spend.
-        studio_index_service.raise_if_cancelled(project_id, job_id)
-
         # Step 1: Generate optimized video prompt using Claude
         prompt_result = video_prompt_service.generate_video_prompt(
             project_id=project_id,
@@ -99,11 +95,6 @@ class VideoService:
                 project_id, job_id,
                 status_message=message
             )
-
-        # Cancellation breakpoint #2: before the VEO API call. This is
-        # the most expensive operation in the entire studio surface —
-        # cancellation here saves dollars per skipped run, not cents.
-        studio_index_service.raise_if_cancelled(project_id, job_id)
 
         # Step 2: Generate video(s) using Google Veo (returns bytes)
         result = google_video_service.generate_video_bytes(

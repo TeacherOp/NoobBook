@@ -51,72 +51,6 @@ _TOP_COLUMNS = {
 }
 
 
-# ──────────────────────────────────────────────────────────────────────
-# Cooperative cancellation
-# ──────────────────────────────────────────────────────────────────────
-# Studio jobs run inside ThreadPoolExecutor workers (task_service.submit_task).
-# When the user clicks Stop in the ActiveTasksBar, the cancel route
-# (api/studio/job_actions.py) does TWO things:
-#
-#   1. Flips studio_jobs.status = "cancelled" so the active-tasks endpoint
-#      stops listing the row (the user-facing affordance).
-#   2. Calls task_service.cancel_tasks_for_target(job_id), adding the
-#      worker's task_id to the in-memory _cancelled_tasks set.
-#
-# Each studio service's entry function (the one wrapped by
-# with_failure_guard) sprinkles `raise_if_cancelled(project_id, job_id)`
-# at its natural breakpoints — start, between loop iterations, before
-# each external API call, before final persist. When ANY breakpoint
-# trips, the service raises StudioJobCancelled and bails cleanly without
-# spending more on Claude / ElevenLabs / VEO / Gemini Imagen.
-#
-# Belt-and-braces: with_failure_guard catches StudioJobCancelled
-# specifically and DOES NOT overwrite the cancelled marker; update_job
-# refuses any non-cancelled status update over an already-cancelled row.
-
-class StudioJobCancelled(Exception):
-    """Raised by studio workers when the user has cancelled the job.
-    Caught at the route boundary; with_failure_guard does NOT re-flip
-    the row to status='error' for this exception type."""
-
-
-def is_job_cancelled(project_id: str, job_id: str) -> bool:
-    """
-    Check whether a studio job has been cancelled. Two-source check:
-
-    1. ``task_service.is_target_cancelled(job_id)`` — looks up
-       background_tasks rows for this target and intersects against the
-       in-memory ``_cancelled_tasks`` set the cancel route writes to.
-       Note: despite the in-memory set being O(1), this call still
-       issues a DB query (``get_tasks_for_target`` does a SELECT). The
-       set just decides which fetched row counts as cancelled.
-    2. ``studio_jobs.status`` (durable across process restarts and
-       visible to other pods if we ever scale out).
-
-    Net cost per breakpoint: two cheap row reads. Acceptable because
-    studio breakpoints fire at well-defined boundaries (start of worker,
-    between loop iterations, before external API calls), not in tight
-    loops — typically a handful per job, never thousands.
-    """
-    # Local import to avoid a cycle: task_service is fine to import at
-    # module load, but doing it lazily here keeps the dependency graph
-    # explicit and matches how source workers (pdf_service, etc.) use it.
-    from app.services.background_services import task_service
-
-    if task_service.is_target_cancelled(job_id):
-        return True
-
-    job = get_job(project_id, job_id)
-    return bool(job and job.get("status") == "cancelled")
-
-
-def raise_if_cancelled(project_id: str, job_id: str) -> None:
-    """Convenience wrapper. Studio services call this between long-running
-    steps. Raises StudioJobCancelled when the user has clicked Stop."""
-    if is_job_cancelled(project_id, job_id):
-        raise StudioJobCancelled(f"Studio job {job_id} cancelled by user")
-
-
 def _get_client():
     """Get Supabase client, raising error if not configured."""
     if not is_supabase_enabled():
@@ -210,10 +144,9 @@ def update_job(
         Updated job record (flattened) or None if not found
     """
     try:
-        # Separate top-level columns from job_data fields. We do this
-        # BEFORE _get_client() so the clobber-check below can short-
-        # circuit without spinning up a Supabase client when the write
-        # is going to be no-op'd anyway.
+        client = _get_client()
+
+        # Separate top-level columns from job_data fields
         top_level = {}
         job_data_updates = {}
 
@@ -226,49 +159,6 @@ def update_job(
                     top_level[k] = v
                 else:
                     job_data_updates[k] = v
-
-        # Clobber-protection: refuse terminal-status writes that would
-        # overwrite a *different* terminal status. Two distinct races
-        # are covered, both at the millisecond boundary:
-        #
-        #   ready / error → cancelled  (worker raced the cancel)
-        #     The cancel route signalled but the worker had already
-        #     queued its terminal write. Without this guard the worker's
-        #     update_job(status="ready") would silently overwrite the
-        #     cancelled marker and the job would re-appear ready.
-        #
-        #   cancelled → ready / error  (user raced the worker)
-        #     The worker finished and wrote status="ready" in the gap
-        #     between the cancel route's initial get_job (which saw
-        #     "processing", so it didn't take the already-terminal early
-        #     exit) and its own update_job(status="cancelled"). Without
-        #     this guard the cancel route would silently flip a
-        #     completed job to cancelled, hiding output the user
-        #     already paid for.
-        #
-        # Only terminal-status writes go through the check (ready, error,
-        # cancelled). Progress-only updates and intermediate
-        # status="processing" updates don't need the extra DB read —
-        # they can't conflict with terminal markers semantically.
-        new_status = top_level.get("status")
-        if new_status in {"ready", "error", "cancelled"}:
-            current_for_clobber = get_job(project_id, job_id)
-            current_status = (current_for_clobber or {}).get("status")
-            # Block any cross-terminal overwrite (e.g. ready→cancelled,
-            # cancelled→ready). Same-status writes (idempotent re-cancel,
-            # ready→ready on a retry) pass through to the normal write
-            # path so updated_at / progress fields can still be touched.
-            if (
-                current_status in {"ready", "error", "cancelled"}
-                and current_status != new_status
-            ):
-                logger.info(
-                    "Refusing to overwrite %s status on job %s (would have gone to %s)",
-                    current_status, job_id, new_status,
-                )
-                return current_for_clobber
-
-        client = _get_client()
 
         # Merge job_data updates via fetch-merge-update
         if job_data_updates:
@@ -328,51 +218,23 @@ def with_failure_guard(callable_func):
         job_id = kwargs.get("job_id")
         try:
             return callable_func(*args, **kwargs)
-        except StudioJobCancelled:
-            # Cancellation is not a crash. The cancel route already wrote
-            # status='cancelled' and the worker bailed cleanly. Don't
-            # overwrite to 'error'. Re-raise so task_service still records
-            # the background_tasks row's status as cancelled (its own
-            # finally block reads exception type).
-            logger.info(
-                "Studio job %s cancelled by user — preserving cancelled status",
-                job_id,
-            )
-            raise
         except Exception as exc:  # noqa: BLE001 — re-raised below
             logger.exception(
                 "Studio job %s (%s) crashed: %s",
                 job_id, getattr(callable_func, "__name__", "unknown"), exc,
             )
-            # Defensive: if the job was cancelled mid-flight and the worker
-            # crashed instead of cooperatively stopping, skip the error
-            # write so we don't clobber the cancelled marker. The outer
-            # `raise` below propagates the original exception either way.
-            #
-            # No nested try/except here on purpose — an earlier draft used
-            # a bare `raise` inside an inner `if is_job_cancelled` branch
-            # and got it caught by the inner `except Exception`, which
-            # then logged "Failed to mark as error after crash" spuriously
-            # on every crash-after-cancel race. Two ERROR logs per crash
-            # is real production noise; the flat structure here avoids it.
             if project_id and job_id:
-                if is_job_cancelled(project_id, job_id):
-                    logger.info(
-                        "Studio job %s crashed while cancelled — preserving cancelled status",
-                        job_id,
+                try:
+                    update_job(
+                        project_id, job_id,
+                        status="error",
+                        error=f"Generation failed: {exc}",
+                        completed_at=datetime.now().isoformat(),
                     )
-                else:
-                    try:
-                        update_job(
-                            project_id, job_id,
-                            status="error",
-                            error=f"Generation failed: {exc}",
-                            completed_at=datetime.now().isoformat(),
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Failed to mark studio job %s as error after crash", job_id,
-                        )
+                except Exception:
+                    logger.exception(
+                        "Failed to mark studio job %s as error after crash", job_id,
+                    )
             raise
 
     wrapped.__name__ = getattr(callable_func, "__name__", "wrapped_studio_job")
@@ -443,26 +305,15 @@ def get_job(
 def list_jobs(
     project_id: str,
     job_type: str,
-    source_id: Optional[str] = None,
-    include_cancelled: bool = False,
+    source_id: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
     List studio jobs by type, optionally filtered by source.
-
-    Cancelled jobs are filtered out by default — they have no usable
-    output (the worker bailed before persisting anything visible) and
-    showing them in the user-facing studio-output tab as "iteration N"
-    rows confused users into thinking the cancel didn't take effect.
-    Callers that genuinely want the audit trail can pass
-    ``include_cancelled=True``.
 
     Args:
         project_id: The project UUID
         job_type: Job type string
         source_id: Optional source UUID to filter by
-        include_cancelled: When True, include rows with status="cancelled".
-            Default False so the studio-output tab and bootstrap call
-            don't surface ghost iterations.
 
     Returns:
         List of job records (flattened), newest first
@@ -478,14 +329,6 @@ def list_jobs(
         )
         if source_id:
             query = query.eq("source_id", source_id)
-        if not include_cancelled:
-            # Postgres three-valued logic: `status != 'cancelled'` evaluates
-            # to NULL (not TRUE) when status IS NULL — so a plain
-            # `.neq("status", "cancelled")` would silently drop any NULL-
-            # status rows. create_job always writes status="pending" today,
-            # but the explicit OR keeps any future codepath that omits
-            # status from disappearing from the output tab.
-            query = query.or_("status.neq.cancelled,status.is.null")
 
         response = query.execute()
         return [_map_job(row) for row in (response.data or [])]
@@ -494,38 +337,22 @@ def list_jobs(
         return []
 
 
-def list_jobs_grouped(
-    project_id: str,
-    include_cancelled: bool = False,
-) -> Dict[str, List[Dict[str, Any]]]:
+def list_jobs_grouped(project_id: str) -> Dict[str, List[Dict[str, Any]]]:
     """
     List all studio jobs for a project, grouped by job_type.
 
     Educational Note: This supports Studio bootstrap without issuing one
     request per section. Callers can filter by source client-side.
-
-    Cancelled jobs are filtered out by default for the same reason
-    list_jobs does — they have no usable output and showing them as
-    iteration rows in the studio-output tab confused users into thinking
-    the Stop button didn't take effect.
     """
     try:
         client = _get_client()
-        query = (
+        response = (
             client.table("studio_jobs")
             .select("*")
             .eq("project_id", project_id)
             .order("created_at", desc=True)
+            .execute()
         )
-        if not include_cancelled:
-            # Postgres three-valued logic: `status != 'cancelled'` evaluates
-            # to NULL (not TRUE) when status IS NULL — so a plain
-            # `.neq("status", "cancelled")` would silently drop any NULL-
-            # status rows. create_job always writes status="pending" today,
-            # but the explicit OR keeps any future codepath that omits
-            # status from disappearing from the output tab.
-            query = query.or_("status.neq.cancelled,status.is.null")
-        response = query.execute()
 
         grouped: Dict[str, List[Dict[str, Any]]] = {}
         for row in (response.data or []):

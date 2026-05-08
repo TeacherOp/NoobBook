@@ -147,9 +147,6 @@ class EmailAgentService:
             status_message="Starting email template generation..."
         )
 
-        # Cancellation breakpoint at worker start.
-        studio_index_service.raise_if_cancelled(project_id, job_id)
-
         # Get source content — skip in edit mode since previous email already encodes it
         if previous_markdown:
             source_content = "Editing a previous email template — see the PREVIOUS EMAIL TEMPLATE section below."

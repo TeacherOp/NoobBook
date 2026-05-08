@@ -76,9 +76,6 @@ class BusinessReportAgentService:
             started_at=started_at
         )
 
-        # Cancellation breakpoint at worker start.
-        studio_index_service.raise_if_cancelled(project_id, job_id)
-
         # Get source information and build user message
         source_info = self._get_source_info(project_id, csv_source_ids, context_source_ids)
         report_types = config.get("report_types", {})

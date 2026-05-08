@@ -73,9 +73,6 @@ class PresentationAgentService:
             started_at=started_at
         )
 
-        # Cancellation breakpoint at worker start.
-        studio_index_service.raise_if_cancelled(project_id, job_id)
-
         # Get source content — skip in edit mode since previous presentation already encodes it
         if previous_markdown:
             source_content = "Editing a previous presentation — see the PREVIOUS PRESENTATION section below."

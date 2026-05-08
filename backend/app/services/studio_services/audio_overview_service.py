@@ -106,12 +106,6 @@ class AudioOverviewService:
             started_at=datetime.now().isoformat()
         )
 
-        # Cancellation breakpoint #1: at the top of the worker, before
-        # any expensive Claude / ElevenLabs API call. Cancels submitted
-        # while the row was still 'pending' bail here, saving the entire
-        # downstream cost.
-        studio_index_service.raise_if_cancelled(project_id, job_id)
-
         # Step 1: Get source metadata
         source = source_index_service.get_source_from_index(project_id, source_id)
         if not source:
@@ -138,11 +132,6 @@ class AudioOverviewService:
             project_id, job_id,
             progress="Generating script..."
         )
-
-        # Cancellation breakpoint #2: before the script-generation
-        # agentic loop (multiple Claude calls). Each loop iteration also
-        # checks via raise_if_cancelled in _generate_script.
-        studio_index_service.raise_if_cancelled(project_id, job_id)
 
         # Step 3: Generate script via agentic loop (writes to Supabase Storage)
         script_result = self._generate_script(
@@ -184,12 +173,6 @@ class AudioOverviewService:
                 completed_at=datetime.now().isoformat()
             )
             return {"success": False, "error": "Script file not found in storage"}
-
-        # Cancellation breakpoint #3: before the ElevenLabs TTS call.
-        # This is the dominant cost on the audio path — minutes of
-        # synthesis aren't cheap. Bail here if the user clicked Stop
-        # while the script was generating.
-        studio_index_service.raise_if_cancelled(project_id, job_id)
 
         audio_result = tts_service.generate_audio_bytes(text=script_text)
 
@@ -332,11 +315,6 @@ class AudioOverviewService:
         max_iterations = 5 if not is_large else self.MAX_ITERATIONS
 
         for iteration in range(1, max_iterations + 1):
-            # Cancellation breakpoint inside the agentic loop. Each
-            # iteration kicks off another Claude call, so a check here
-            # bails before sending any further tokens.
-            studio_index_service.raise_if_cancelled(project_id, job_id)
-
             # Update progress
             studio_index_service.update_audio_job(
                 project_id, job_id,

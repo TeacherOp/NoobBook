@@ -137,9 +137,6 @@ class InfographicService:
             started_at=datetime.now().isoformat()
         )
 
-        # Cancellation breakpoint #1: at worker start.
-        studio_index_service.raise_if_cancelled(project_id, job_id)
-
         try:
             # Get source content if a source is provided
             content = ""
@@ -196,10 +193,6 @@ class InfographicService:
                 # Fall back to Claude's prompt if the user gave no
                 # direction at all and Claude couldn't infer a title.
                 image_prompt = prompt_result.get("image_prompt", "")
-
-            # Cancellation breakpoint #2: before the Imagen call. Bails
-            # if the user cancelled while Claude was generating the prompt.
-            studio_index_service.raise_if_cancelled(project_id, job_id)
 
             # Step 2: Generate image with Gemini
             studio_index_service.update_infographic_job(

@@ -549,21 +549,51 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       // (`Cannot read properties of undefined (reading 'id')`).
       if (!canonicalUserMessage?.id) return;
       canonicalUserMessageReceivedRef.current = true;
+      // Carry the optimistic blob URLs onto the canonical message's image
+      // blocks. The server-signed URLs aren't always reachable from the
+      // browser in the active session (proxy / cache / momentary RLS race),
+      // and an earlier revision swapped to them on this event — making the
+      // image vanish from the bubble the moment the AI started answering.
+      // Local blob URLs are guaranteed-live for the page lifetime, so we
+      // keep them for *this* session; on full page refresh, the persisted
+      // image blocks rebuild from a fresh signed URL via the formatter.
+      let mergedCanonical: Chat['messages'][number] = canonicalUserMessage;
+      if (
+        Array.isArray(canonicalUserMessage.content) &&
+        optimisticBlobUrls.length > 0
+      ) {
+        let blobIdx = 0;
+        const mergedContent = (canonicalUserMessage.content as Array<{ type: string; url?: string }>).map(
+          (block) => {
+            if (block.type === 'image' && optimisticBlobUrls[blobIdx]) {
+              const blobUrl = optimisticBlobUrls[blobIdx];
+              blobIdx += 1;
+              return { ...block, url: blobUrl };
+            }
+            return block;
+          },
+        );
+        mergedCanonical = {
+          ...canonicalUserMessage,
+          content: mergedContent as Chat['messages'][number]['content'],
+        };
+      }
       setActiveChat((prev) => {
         if (!prev) return null;
         const nextMessages = prev.messages.map((msg) =>
-          msg.id === tempUserMessage.id ? canonicalUserMessage : msg
+          msg.id === tempUserMessage.id ? mergedCanonical : msg
         );
-        const alreadyPresent = nextMessages.some((msg) => msg.id === canonicalUserMessage.id);
+        const alreadyPresent = nextMessages.some((msg) => msg.id === mergedCanonical.id);
         return {
           ...prev,
-          messages: alreadyPresent ? nextMessages : [...nextMessages.filter((msg) => msg.id !== tempUserMessage.id), canonicalUserMessage],
+          messages: alreadyPresent ? nextMessages : [...nextMessages.filter((msg) => msg.id !== tempUserMessage.id), mergedCanonical],
         };
       });
-      // The canonical message renders from server-signed URLs now, so the
-      // local blob URLs are no longer referenced by the DOM. Revoke to free
-      // the underlying File buffers.
-      revokeOptimisticBlobs();
+      // Intentionally NOT revoking optimisticBlobUrls here — the merged
+      // canonical message is still pointing at them. They'll be released
+      // when the browser tab navigates away. The small per-image
+      // (≤5MB cap) memory cost is the trade-off for a working preview
+      // throughout the session.
     };
 
     const appendAssistantMessage = (assistantMessage: Chat['messages'][number]) => {
@@ -736,11 +766,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     } finally {
       onRemoveSendingChat(sendingChatId);
       abortControllerRef.current = null;
-      // Defence-in-depth: if neither the success path nor any catch
-      // branch ran (shouldn't happen in normal control flow, but JS
-      // exception edges exist), still free the optimistic blob URLs.
-      // No-op if already revoked above.
-      revokeOptimisticBlobs();
+      // Only revoke optimistic blob URLs if we never got a canonical
+      // user message to attach them to (send-aborted, fallback-error,
+      // user-cancelled). When the canonical did arrive, the merged
+      // message is still pointing at these blob URLs — revoking here
+      // would be the bug we're fixing. The browser will free them when
+      // the tab navigates.
+      if (!canonicalUserMessageReceivedRef.current) {
+        revokeOptimisticBlobs();
+      }
     }
   };
 

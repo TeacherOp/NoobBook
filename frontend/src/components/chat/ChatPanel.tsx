@@ -75,6 +75,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const canonicalUserMessageReceivedRef = useRef(false);
   const assistantDeltaReceivedRef = useRef(false);
   const pendingTitleSyncRef = useRef<{ chatId: string; hasSeenNamingTask: boolean } | null>(null);
+  // Mirrors activeChat?.id so async callbacks (recoverChatFromServer) can
+  // check "is the user still on the originating chat?" *synchronously*
+  // without going through a setState updater — React 18's automatic
+  // batching means functional-updater side effects don't run before the
+  // line that reads them, which broke the previous guard pattern.
+  const activeChatIdRef = useRef<string | null>(null);
 
   // Sources state for header display
   const [sources, setSources] = useState<Source[]>([]);
@@ -198,6 +204,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   }, [activeChat, onSignalsChange]);
 
+  // Keep the activeChatId ref in sync — read-only mirror used by async
+  // recovery paths so they can compare current chat without racing with
+  // batched state updates.
+  useEffect(() => {
+    activeChatIdRef.current = activeChat?.id ?? null;
+  }, [activeChat?.id]);
+
   /**
    * Load per-chat cost/token breakdown whenever the active chat changes.
    * Refreshed again after each message via `loadChatCosts()` in the send flow.
@@ -279,22 +292,29 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
    * persisted whatever it produced, so we just need to surface it.
    *
    * Chat-id-aware: if the user has switched to a different chat by the
-   * time the refetch returns, the activeChat replacement is skipped so
-   * the recovery doesn't yank them back to the chat they navigated away
-   * from. The source-selection notification fires only when the chat is
-   * still active.
+   * time the refetch returns, the activeChat replacement and source-
+   * selection notification are skipped so the recovery doesn't yank
+   * them back to the chat they navigated away from.
+   *
+   * The "still on this chat?" check is read off `activeChatIdRef` (kept
+   * in sync via useEffect above) — synchronously and reliably. A prior
+   * version of this helper used a side effect inside a setActiveChat
+   * functional updater, which doesn't fire before the line that reads
+   * it under React 18 automatic batching (Greptile flagged this on
+   * PR #204). The functional updater on setActiveChat is still kept as
+   * defence-in-depth against a chat switch racing in between the ref
+   * check and the actual state commit.
    */
   const recoverChatFromServer = useCallback(
     async (chatId: string, errorToastMessage?: string) => {
       try {
         const chat = await chatsAPI.getChat(projectId, chatId);
-        let stillActive = false;
-        setActiveChat((prev) => {
-          if (!prev || prev.id !== chat.id) return prev;
-          stillActive = true;
-          return chat;
-        });
+        const stillActive = activeChatIdRef.current === chat.id;
         if (stillActive) {
+          setActiveChat((prev) => {
+            if (!prev || prev.id !== chat.id) return prev;
+            return chat;
+          });
           onActiveChatChange(chat.id, chat.selected_source_ids ?? []);
         }
         onCostsChange?.();

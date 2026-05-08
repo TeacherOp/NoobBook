@@ -479,7 +479,13 @@ def list_jobs(
         if source_id:
             query = query.eq("source_id", source_id)
         if not include_cancelled:
-            query = query.neq("status", "cancelled")
+            # Postgres three-valued logic: `status != 'cancelled'` evaluates
+            # to NULL (not TRUE) when status IS NULL — so a plain
+            # `.neq("status", "cancelled")` would silently drop any NULL-
+            # status rows. create_job always writes status="pending" today,
+            # but the explicit OR keeps any future codepath that omits
+            # status from disappearing from the output tab.
+            query = query.or_("status.neq.cancelled,status.is.null")
 
         response = query.execute()
         return [_map_job(row) for row in (response.data or [])]
@@ -512,7 +518,13 @@ def list_jobs_grouped(
             .order("created_at", desc=True)
         )
         if not include_cancelled:
-            query = query.neq("status", "cancelled")
+            # Postgres three-valued logic: `status != 'cancelled'` evaluates
+            # to NULL (not TRUE) when status IS NULL — so a plain
+            # `.neq("status", "cancelled")` would silently drop any NULL-
+            # status rows. create_job always writes status="pending" today,
+            # but the explicit OR keeps any future codepath that omits
+            # status from disappearing from the output tab.
+            query = query.or_("status.neq.cancelled,status.is.null")
         response = query.execute()
 
         grouped: Dict[str, List[Dict[str, Any]]] = {}

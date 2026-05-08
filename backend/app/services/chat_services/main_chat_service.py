@@ -14,7 +14,34 @@ Message Flow:
 The service uses message_service for all message handling and tool parsing.
 """
 import logging
-from typing import Dict, Any, Tuple, List, Optional, Callable
+from typing import Dict, Any, Tuple, List, Optional, Callable, Union
+
+
+# A user message coming in from the API can be either a plain string
+# (legacy / no-attachment path) or a list of content blocks (new path
+# with inline image attachments). Both shapes round-trip through
+# add_user_message → JSONB storage → build_api_messages.
+UserMessagePayload = Union[str, List[Dict[str, Any]]]
+
+
+def _extract_user_text(content: UserMessagePayload) -> str:
+    """
+    Pull the plain-text portion out of a user-message payload, supporting
+    either a raw string or a content-block list. Used by codepaths that
+    want only the user's words (chat naming, studio-signal direction
+    override) — they shouldn't see internal image-block metadata.
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and block.get("text")
+        )
+    return ""
 
 from app.services.data_services import chat_service
 from app.services.data_services.user_service import get_user_service
@@ -326,7 +353,10 @@ class MainChatService:
             # this is the belt-and-braces guarantee.
             signals = tool_input.get("signals", [])
             if user_message_text and isinstance(signals, list):
-                stripped = user_message_text.strip()
+                # user_message_text can be a content-block list when the
+                # user attached an inline image — strip() only works on
+                # the text portion, so extract that first.
+                stripped = _extract_user_text(user_message_text).strip()
                 if stripped:
                     signals = [
                         {**s, "direction": stripped} if isinstance(s, dict) else s
@@ -436,7 +466,7 @@ class MainChatService:
         self,
         project_id: str,
         chat_id: str,
-        user_message_text: str,
+        user_message_text: UserMessagePayload,
         *,
         stream_text: bool = False,
         user_id: Optional[str] = None,
@@ -712,13 +742,15 @@ class MainChatService:
         # The naming runs in background so it doesn't block the response.
         if chat.get("message_count", 0) == 0:
             # Submit naming task to background
+            # Chat naming uses the plain-text portion only — image-block
+            # metadata isn't useful for picking a 1-5 word title.
             task_service.submit_task(
                 "chat_naming",
                 chat_id,
                 self._generate_and_update_chat_title,
                 project_id,
                 chat_id,
-                user_message_text,
+                _extract_user_text(user_message_text),
                 target_type="chat",
             )
 
@@ -732,7 +764,7 @@ class MainChatService:
         self,
         project_id: str,
         chat_id: str,
-        user_message_text: str
+        user_message_text: UserMessagePayload,
     ) -> Dict[str, Any]:
         """Process a user message and return saved messages plus sync metadata."""
         return self._run_message_flow(
@@ -746,7 +778,7 @@ class MainChatService:
         self,
         project_id: str,
         chat_id: str,
-        user_message_text: str,
+        user_message_text: UserMessagePayload,
         *,
         user_id: Optional[str] = None,
         on_event: Optional[Callable[[str, Dict[str, Any]], None]] = None,

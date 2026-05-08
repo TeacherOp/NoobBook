@@ -12,6 +12,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Ghost, FileText, Copy, Check, DownloadSimple, ArrowDown } from '@phosphor-icons/react';
 import type { Message } from '../../lib/api/chats';
+import { messageContentAsText } from '../../lib/api/chats';
 import { parseCitations } from '../../lib/citations';
 import { CitationBadge } from './CitationBadge';
 import { Separator } from '../ui/separator';
@@ -175,17 +176,62 @@ const markdownComponents: Record<string, React.FC<any>> = {
 
 /**
  * User Message Component
- * Educational Note: Right-aligned bubble style for user messages
+ * Educational Note: Right-aligned bubble style for user messages.
+ * Content is either a plain string (legacy / no-attachment) or a list of
+ * typed blocks `[{type:"image", url, ...}, {type:"text", text}]` when the
+ * user pasted/dropped images. Image blocks render as thumbnails above
+ * the text inside the same bubble.
  */
-const UserMessage: React.FC<{ content: string }> = ({ content }) => (
-  <div className="flex justify-end w-full">
-    <div className="max-w-[80%] min-w-0">
-      <div className="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2 min-w-0">
-        <p className="text-sm whitespace-pre-wrap break-words">{content}</p>
+type UserMessageBlock =
+  | { type: 'image'; url: string; media_type?: string; filename?: string }
+  | { type: 'text'; text: string };
+
+const UserMessage: React.FC<{ content: string | UserMessageBlock[] }> = ({ content }) => {
+  const isBlocks = Array.isArray(content);
+  const imageBlocks = isBlocks
+    ? (content as UserMessageBlock[]).filter((b): b is Extract<UserMessageBlock, { type: 'image' }> => b.type === 'image')
+    : [];
+  const textValue = isBlocks
+    ? (content as UserMessageBlock[])
+        .filter((b): b is Extract<UserMessageBlock, { type: 'text' }> => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n')
+    : (content as string);
+
+  return (
+    <div className="flex justify-end w-full">
+      <div className="max-w-[80%] min-w-0">
+        <div className="bg-primary text-primary-foreground rounded-2xl rounded-tr-sm px-4 py-2 min-w-0 space-y-2">
+          {imageBlocks.length > 0 && (
+            <div className="flex flex-wrap gap-2 -mx-1">
+              {imageBlocks.map((block, idx) => (
+                <a
+                  key={`${block.url}-${idx}`}
+                  href={block.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  // Open in a new tab so the user can see the full image.
+                  // Bubble cap of ~240px keeps the chat compact.
+                  className="block"
+                  title={block.filename || 'attachment'}
+                >
+                  <img
+                    src={block.url}
+                    alt={block.filename || 'attachment'}
+                    className="max-h-60 max-w-full rounded-lg object-cover border border-primary-foreground/20"
+                  />
+                </a>
+              ))}
+            </div>
+          )}
+          {textValue && (
+            <p className="text-sm whitespace-pre-wrap break-words">{textValue}</p>
+          )}
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 /**
  * AI Message Component
@@ -627,8 +673,10 @@ export const ChatMessages: React.FC<ChatMessagesProps> = React.memo(({
             {msg.role === 'user' ? (
               <UserMessage content={msg.content} />
             ) : (
+              // AI messages don't carry image blocks today; coerce to
+              // string so the markdown renderer's prop type stays simple.
               <AIMessage
-                content={msg.content}
+                content={messageContentAsText(msg.content)}
                 projectId={projectId}
                 studioAssetRewriter={studioAssetRewriter}
               />

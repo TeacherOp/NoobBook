@@ -16,13 +16,50 @@ import type { UserUsage } from './settings';
 const log = createLogger('chats-api');
 
 /**
+ * Image block on a user message — rendered inline above the text in the
+ * chat bubble. The backend supplies `url` as a freshly-signed URL on
+ * every read, so the field is short-lived; do not persist it.
+ */
+export interface MessageImageBlock {
+  type: 'image';
+  url: string;
+  media_type?: string;
+  filename?: string;
+}
+
+export interface MessageTextBlock {
+  type: 'text';
+  text: string;
+}
+
+export type MessageContentBlock = MessageImageBlock | MessageTextBlock;
+
+/**
+ * Render a Message['content'] as a plain string. For block-content
+ * messages with image attachments, returns the concatenated text
+ * portion (image blocks are dropped). Use this for any callsite that
+ * needs string operations (.replace, exporters, search index, etc.) —
+ * the rich block representation lives only in the chat-bubble renderer.
+ */
+export function messageContentAsText(content: string | MessageContentBlock[]): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((b): b is MessageTextBlock => b.type === 'text')
+    .map((b) => b.text)
+    .join('\n');
+}
+
+/**
  * Educational Note: A message in the conversation.
- * Each message has a role (user or assistant) and content.
+ * Each message has a role (user or assistant) and content. Content is a
+ * plain string for text-only messages (the common case) and a list of
+ * typed blocks when the user attached an inline image — image blocks
+ * always come before text in the rendered order.
  */
 export interface Message {
   id: string;
   role: 'user' | 'assistant';
-  content: string;
+  content: string | MessageContentBlock[];
   timestamp: string;
   model?: string;
   tokens?: {
@@ -317,18 +354,39 @@ class ChatsAPI {
     chatId: string,
     message: string,
     callbacks?: StreamMessageCallbacks,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    attachments?: File[]
   ): Promise<StreamMessageResult> {
     const token = getAccessToken();
+    // Two transport shapes:
+    //  - JSON (legacy, no attachments) — small body, no boundary parsing.
+    //  - multipart/form-data (with attachments) — backend route detects
+    //    Content-Type and dispatches; image files are uploaded inside
+    //    the same request as the message text. Don't set Content-Type
+    //    manually for FormData — the browser writes the multipart
+    //    boundary automatically and a manual header would corrupt it.
+    const hasAttachments = !!(attachments && attachments.length);
+    const headers: Record<string, string> = {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+    let body: BodyInit;
+    if (hasAttachments) {
+      const form = new FormData();
+      form.append('message', message);
+      attachments!.forEach((file, idx) => {
+        form.append('attachments', file, file.name || `attachment-${idx}`);
+      });
+      body = form;
+    } else {
+      headers['Content-Type'] = 'application/json';
+      body = JSON.stringify({ message });
+    }
     const response = await fetch(
       `${API_BASE_URL}/projects/${projectId}/chats/${chatId}/messages/stream`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ message }),
+        headers,
+        body,
         signal,
       }
     );

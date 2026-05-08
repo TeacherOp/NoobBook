@@ -7,6 +7,7 @@
 import { parseCitations } from './citations';
 import { sourcesAPI, type ChunkContent } from './api/sources';
 import type { Chat } from './api/chats';
+import { messageContentAsText } from './api/chats';
 
 /**
  * Convert a title into a filename-safe slug
@@ -79,7 +80,7 @@ export async function exportChatAsMarkdown({
 
   for (const msg of messages) {
     if (msg.role !== 'assistant') continue;
-    const parsed = parseCitations(msg.content);
+    const parsed = parseCitations(messageContentAsText(msg.content));
     for (const entry of parsed.uniqueCitations) {
       if (!globalChunkToFootnote.has(entry.chunkId)) {
         globalChunkToFootnote.set(entry.chunkId, footnoteCounter++);
@@ -122,13 +123,17 @@ export async function exportChatAsMarkdown({
     lines.push(`*${formatDate(msg.timestamp)}*`);
     lines.push('');
 
-    let content = msg.content;
+    // Coerce block-content (user messages with attached images) to a
+    // text-only string for the markdown export — exporters strip image
+    // blocks today; surfacing inline-image attachments in exported MD
+    // is a separate enhancement.
+    let content = messageContentAsText(msg.content);
 
     // Replace citation markers with footnote references in assistant messages
     if (msg.role === 'assistant' && globalChunkToFootnote.size > 0) {
       content = content.replace(
         /\[\[cite:([a-zA-Z0-9_-]+_page_\d+_chunk_\d+)\]\]/g,
-        (_match, chunkId: string) => {
+        (_match: string, chunkId: string) => {
           const footnoteNum = globalChunkToFootnote.get(chunkId);
           return footnoteNum ? `[^${footnoteNum}]` : '';
         }

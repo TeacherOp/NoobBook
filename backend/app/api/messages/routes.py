@@ -29,14 +29,125 @@ Routes:
 import json
 import queue
 import threading
+import uuid
+from typing import Any, List, Tuple, Union
 
 from flask import jsonify, request, current_app, Response, stream_with_context
+from werkzeug.utils import secure_filename
 from app.api.messages import messages_bp
 from app.services.chat_services import main_chat_service
 from app.services.auth.rbac import get_request_identity
+from app.services.integrations.supabase import storage_service
 
 
 _STREAM_SENTINEL = object()
+
+# Inline chat-image attachment constraints. Anthropic's vision API caps
+# at 5MB per image and supports png/jpeg/webp/gif. We cap at 10 images
+# per message — more than enough for "drop a few screenshots" and keeps
+# the multipart payload bounded.
+_ALLOWED_ATTACHMENT_MIMES = {
+    "image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif",
+}
+_MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024
+_MAX_ATTACHMENTS_PER_MESSAGE = 10
+
+
+def _parse_message_request(project_id: str, chat_id: str) -> Tuple[Any, Union[Tuple[Response, int], None]]:
+    """
+    Read the message text + any inline image attachments from the request,
+    upload images to chat-attachments storage, and return the payload to
+    pass to main_chat_service.
+
+    Supports both `application/json` (text-only, legacy) and
+    `multipart/form-data` (text + attachments). Returns a tuple of
+    (user_message_payload, error_response). On error, error_response is
+    a (jsonified, status_code) pair the route can return directly; on
+    success, error_response is None.
+
+    The payload is either a plain string (no attachments — current shape
+    add_user_message has handled forever) or a list of content blocks
+    (new shape — image blocks first, text block last). Both flow through
+    add_user_message → JSONB storage → build_api_messages transparently.
+    """
+    content_type = request.content_type or ""
+
+    if content_type.startswith("multipart/"):
+        user_message_text = (request.form.get("message") or "").strip()
+        upload_files = request.files.getlist("attachments")
+    else:
+        data = request.get_json(silent=True) or {}
+        user_message_text = (data.get("message") or "").strip()
+        upload_files = []
+
+    if not user_message_text and not upload_files:
+        return None, (jsonify({"success": False, "error": "Message or attachment required"}), 400)
+
+    if len(upload_files) > _MAX_ATTACHMENTS_PER_MESSAGE:
+        return None, (jsonify({
+            "success": False,
+            "error": f"Maximum {_MAX_ATTACHMENTS_PER_MESSAGE} attachments per message.",
+        }), 400)
+
+    attachment_blocks: List[dict] = []
+    for upload in upload_files:
+        mime = (upload.content_type or "").lower()
+        # Normalise jpg → jpeg so downstream MIME comparisons are consistent.
+        if mime == "image/jpg":
+            mime = "image/jpeg"
+        if mime not in _ALLOWED_ATTACHMENT_MIMES:
+            return None, (jsonify({
+                "success": False,
+                "error": f"Unsupported image format ({mime or 'unknown'}). Allowed: PNG, JPEG, WebP, GIF.",
+            }), 400)
+
+        data_bytes = upload.read()
+        if not data_bytes:
+            return None, (jsonify({"success": False, "error": "Empty attachment."}), 400)
+        if len(data_bytes) > _MAX_ATTACHMENT_BYTES:
+            return None, (jsonify({
+                "success": False,
+                "error": f"Image exceeds {_MAX_ATTACHMENT_BYTES // (1024*1024)}MB limit.",
+            }), 400)
+
+        attachment_id = uuid.uuid4().hex
+        # secure_filename() returns "" for purely punctuation/Unicode names —
+        # fall back to a generated name so the storage path isn't malformed.
+        safe_name = secure_filename(upload.filename or "") or f"attachment-{attachment_id}"
+        storage_path = storage_service.upload_chat_attachment(
+            project_id=project_id,
+            chat_id=chat_id,
+            attachment_id=attachment_id,
+            filename=safe_name,
+            file_data=data_bytes,
+            content_type=mime,
+        )
+        if not storage_path:
+            return None, (jsonify({"success": False, "error": "Failed to store attachment."}), 500)
+
+        attachment_blocks.append({
+            "type": "image",
+            "storage_path": storage_path,
+            "media_type": mime,
+            "filename": safe_name,
+            # Signed URL is a convenience for chat-history rendering. It's
+            # short-lived (1h); _format_message_for_frontend re-signs on
+            # subsequent reads.
+            "url": storage_service.get_chat_attachment_url(storage_path) or "",
+        })
+
+    if attachment_blocks:
+        # Image blocks come BEFORE text — Anthropic's vision docs recommend
+        # this for best instruction-following ("here's an image, here's
+        # what to do with it").
+        user_message_payload: Union[str, list] = [
+            *attachment_blocks,
+            {"type": "text", "text": user_message_text or ""},
+        ]
+    else:
+        user_message_payload = user_message_text
+
+    return user_message_payload, None
 
 
 def _format_sse(event_name: str, payload: dict | None = None) -> str:
@@ -70,22 +181,16 @@ def send_message(project_id, chat_id):
         }
     """
     try:
-        data = request.get_json()
-
-        if not data or 'message' not in data:
-            return jsonify({
-                'success': False,
-                'error': 'Message is required'
-            }), 400
-
-        user_message_text = data['message']
+        user_message_payload, err = _parse_message_request(project_id, chat_id)
+        if err is not None:
+            return err
 
         # Delegate all processing to main_chat_service
         # This is the RAG + agentic loop entry point
         result = main_chat_service.send_message(
             project_id=project_id,
             chat_id=chat_id,
-            user_message_text=user_message_text
+            user_message_text=user_message_payload,
         )
 
         return jsonify({
@@ -116,15 +221,10 @@ def stream_message(project_id, chat_id):
 
     The final saved assistant message is emitted as an `assistant_done` event.
     """
-    data = request.get_json()
+    user_message_payload, err = _parse_message_request(project_id, chat_id)
+    if err is not None:
+        return err
 
-    if not data or 'message' not in data:
-        return jsonify({
-            'success': False,
-            'error': 'Message is required'
-        }), 400
-
-    user_message_text = data['message']
     identity = get_request_identity()
     user_id = identity.user_id
     app = current_app._get_current_object()
@@ -158,7 +258,7 @@ def stream_message(project_id, chat_id):
             main_chat_service.stream_message(
                 project_id=project_id,
                 chat_id=chat_id,
-                user_message_text=user_message_text,
+                user_message_text=user_message_payload,
                 user_id=user_id,
                 on_event=emit,
                 cancel_event=cancel_event,

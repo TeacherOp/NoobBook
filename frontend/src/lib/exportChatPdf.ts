@@ -17,6 +17,7 @@ import { Marked } from 'marked';
 import { parseCitations } from './citations';
 import { sourcesAPI, type ChunkContent } from './api/sources';
 import type { Chat } from './api/chats';
+import { messageContentAsText } from './api/chats';
 
 // Isolated marked instance — raw HTML rendering disabled to prevent XSS.
 const pdfMarked = new Marked({
@@ -195,7 +196,10 @@ export function buildChatHtml(
   for (const msg of messages) {
     const isUser = msg.role === 'user';
     const roleName = isUser ? 'You' : 'NoobBook';
-    let renderedContent = pdfMarked.parse(msg.content) as string;
+    // Coerce block-content (user messages with attached images) to a
+    // text-only string for the PDF export — image-block attachments
+    // aren't included in the PDF render today.
+    let renderedContent = pdfMarked.parse(messageContentAsText(msg.content)) as string;
 
     if (!isUser && globalChunkToFootnote.size > 0) {
       renderedContent = renderedContent.replace(
@@ -271,7 +275,7 @@ export async function exportChatAsPdf({
   let footnoteCounter = 1;
   for (const msg of messages) {
     if (msg.role !== 'assistant') continue;
-    const parsed = parseCitations(msg.content);
+    const parsed = parseCitations(messageContentAsText(msg.content));
     for (const entry of parsed.uniqueCitations) {
       if (!globalChunkToFootnote.has(entry.chunkId)) {
         globalChunkToFootnote.set(entry.chunkId, footnoteCounter++);

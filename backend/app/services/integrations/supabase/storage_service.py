@@ -75,6 +75,11 @@ BUCKET_PROCESSED = "processed-files"
 BUCKET_CHUNKS = "chunks"
 BUCKET_STUDIO = "studio-outputs"
 BUCKET_BRAND_ASSETS = "brand-assets"
+# Transient inline images pasted/dropped into the chat input. Stored
+# permanently for chat-history rendering, but cleared when the chat is
+# deleted (cascade). Distinct from raw-files so RLS policies and
+# cleanup-on-chat-delete stay simple (single-prefix remove).
+BUCKET_CHAT_ATTACHMENTS = "chat-attachments"
 
 # Supabase storage3 defaults to limit=100 which silently drops entries.
 # Use a high limit to ensure we list all files in a folder.
@@ -563,6 +568,128 @@ def delete_source_chunks(project_id: str, source_id: str) -> bool:
         return True
     except Exception as e:
         logger.error("Failed to delete chunks for %s: %s", prefix, e)
+        return False
+
+
+# =============================================================================
+# CHAT ATTACHMENTS (Inline images pasted/dropped into the chat input)
+# =============================================================================
+#
+# Transient screenshots / images attached to a chat message — distinct from
+# Sources because they're one-shot context, not RAG-indexed knowledge. Layout:
+#
+#   {project_id}/{chat_id}/{attachment_id}/{filename}
+#
+# Cleanup-on-chat-delete is a single-prefix remove (cascade-safe).
+
+def _build_chat_attachment_path(
+    project_id: str, chat_id: str, attachment_id: str, filename: str
+) -> str:
+    return f"{project_id}/{chat_id}/{attachment_id}/{filename}"
+
+
+def upload_chat_attachment(
+    project_id: str,
+    chat_id: str,
+    attachment_id: str,
+    filename: str,
+    file_data: Union[bytes, BinaryIO],
+    content_type: str = "application/octet-stream",
+) -> Optional[str]:
+    """
+    Upload an inline chat attachment (typically a screenshot pasted/dropped
+    into the chat input). Returns the storage path on success.
+
+    Mirrors the upload_raw_file shape but writes to the chat-attachments
+    bucket and uses a chat-scoped path prefix so cascade-delete on chat
+    removal is a single prefix wipe.
+    """
+    client = _get_client()
+    path = _build_chat_attachment_path(project_id, chat_id, attachment_id, filename)
+    file_options = {"content-type": content_type}
+
+    try:
+        if not isinstance(file_data, (bytes, bytearray)):
+            try:
+                payload = file_data.read()
+            except Exception:
+                payload = file_data
+        else:
+            payload = bytes(file_data)
+        client.storage.from_(BUCKET_CHAT_ATTACHMENTS).upload(
+            path=path,
+            file=payload,
+            file_options=file_options,
+        )
+        return path
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "duplicate" in msg or "already exists" in msg:
+            try:
+                client.storage.from_(BUCKET_CHAT_ATTACHMENTS).remove([path])
+                client.storage.from_(BUCKET_CHAT_ATTACHMENTS).upload(
+                    path=path, file=payload, file_options=file_options,
+                )
+                return path
+            except Exception as retry_exc:
+                logger.error("Chat-attachment retry upload failed for %s: %s", path, retry_exc)
+                return None
+        logger.error("Failed to upload chat attachment %s: %s", path, exc)
+        return None
+
+
+def download_chat_attachment(path: str) -> Optional[bytes]:
+    """
+    Download a chat attachment by full storage path. Used by the chat
+    pipeline when building Claude vision payloads (fresh base64 per send).
+    """
+    client = _get_client()
+    try:
+        return client.storage.from_(BUCKET_CHAT_ATTACHMENTS).download(path)
+    except Exception as e:
+        logger.error("Failed to download chat attachment %s: %s", path, e)
+        return None
+
+
+def get_chat_attachment_url(path: str, expires_in: int = 3600) -> Optional[str]:
+    """Signed URL for in-app chat-history rendering."""
+    client = _get_client()
+    try:
+        response = client.storage.from_(BUCKET_CHAT_ATTACHMENTS).create_signed_url(path, expires_in)
+        return _rewrite_signed_url_for_browser(response.get("signedURL"))
+    except Exception as e:
+        logger.error("Failed to get signed URL for chat attachment %s: %s", path, e)
+        return None
+
+
+def delete_chat_attachments_for_chat(project_id: str, chat_id: str) -> bool:
+    """
+    Cascade-delete every attachment under a chat's prefix. Called from
+    chat_service.delete_chat to keep storage in sync with the messages
+    cascade. Idempotent — empty prefix is a no-op success.
+    """
+    client = _get_client()
+    prefix = f"{project_id}/{chat_id}/"
+
+    try:
+        # The bucket layout is {project_id}/{chat_id}/{attachment_id}/{filename}
+        # so list returns the per-attachment dirs at this depth — recurse one
+        # level via list-with-prefix to get the actual file paths to remove.
+        attachment_dirs = client.storage.from_(BUCKET_CHAT_ATTACHMENTS).list(
+            prefix.rstrip("/"), options=_LIST_OPTIONS
+        ) or []
+        all_paths: List[str] = []
+        for entry in attachment_dirs:
+            sub_prefix = f"{prefix}{entry['name']}/"
+            files = client.storage.from_(BUCKET_CHAT_ATTACHMENTS).list(
+                sub_prefix.rstrip("/"), options=_LIST_OPTIONS
+            ) or []
+            all_paths.extend(f"{sub_prefix}{f['name']}" for f in files)
+        if all_paths:
+            client.storage.from_(BUCKET_CHAT_ATTACHMENTS).remove(all_paths)
+        return True
+    except Exception as e:
+        logger.error("Failed to delete chat attachments for %s: %s", prefix, e)
         return False
 
 

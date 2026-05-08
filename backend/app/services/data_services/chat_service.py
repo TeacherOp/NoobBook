@@ -394,6 +394,21 @@ class ChatService:
         # Delete the chat (messages and signals cascade automatically)
         self.supabase.table(self.table).delete().eq("id", chat_id).eq("project_id", project_id).execute()
 
+        # Cascade-delete inline chat attachments from storage. The DB
+        # cascade only covers tables, not the storage bucket — without
+        # this, screenshots pasted into deleted chats would orphan in
+        # the chat-attachments bucket forever. Best-effort: a storage
+        # failure shouldn't block the DB delete from being reported.
+        try:
+            from app.services.integrations.supabase import storage_service
+            storage_service.delete_chat_attachments_for_chat(project_id, chat_id)
+        except Exception as exc:  # pragma: no cover — defensive
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to clean chat-attachment storage for %s/%s: %s",
+                project_id, chat_id, exc,
+            )
+
         return True
 
     def sync_chat_to_index(self, project_id: str, chat_id: str) -> bool:

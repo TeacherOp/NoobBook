@@ -14,6 +14,7 @@ Key Responsibilities:
 For parsing Claude API responses (tool_use blocks, content extraction),
 see utils/claude_parsing_utils.py
 """
+import base64
 import json
 import uuid
 from datetime import datetime
@@ -190,7 +191,22 @@ class MessageService:
         # - A string (legacy)
         # - A list of content blocks (tool_use responses from Claude)
         #   e.g. [{"type": "text", "text": "..."}, {"type": "tool_use", ...}]
-        if isinstance(content, dict) and "text" in content:
+        # If the user attached inline images, the persisted content is a
+        # list with `{"type":"image","storage_path":...}` blocks. We surface
+        # those to the frontend as a typed-block list so the chat UI can
+        # render the image inline; pure-text messages keep the legacy
+        # string shape so existing renderers don't have to change.
+        has_image_blocks = (
+            isinstance(content, list)
+            and any(
+                isinstance(b, dict) and b.get("type") == "image"
+                for b in content
+            )
+        )
+
+        if has_image_blocks:
+            text_content = self._format_blocks_with_images(content)
+        elif isinstance(content, dict) and "text" in content:
             text_content = content["text"]
         elif isinstance(content, str):
             text_content = content
@@ -218,22 +234,69 @@ class MessageService:
             "error": is_error,
         }
 
+    def _format_blocks_with_images(self, content: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Project a persisted user-message content list down to the shape the
+        frontend renderer wants: a list of {type, ...} blocks with image
+        URLs re-signed at read time. Internal-only fields (storage_path)
+        and tool blocks are stripped.
+        """
+        # Lazy-import to avoid a circular dependency between message_service
+        # (data layer) and storage_service (integration layer).
+        from app.services.integrations.supabase import storage_service
+
+        rendered: List[Dict[str, Any]] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "image":
+                storage_path = block.get("storage_path")
+                if not storage_path:
+                    # Frontend-supplied image (e.g. blob URL during optimistic
+                    # render) — pass URL straight through if present.
+                    if block.get("url"):
+                        rendered.append({
+                            "type": "image",
+                            "url": block["url"],
+                            "media_type": block.get("media_type", "image/png"),
+                            "filename": block.get("filename", "attachment"),
+                        })
+                    continue
+                signed_url = storage_service.get_chat_attachment_url(storage_path) or ""
+                rendered.append({
+                    "type": "image",
+                    "url": signed_url,
+                    "media_type": block.get("media_type", "image/png"),
+                    "filename": block.get("filename", "attachment"),
+                })
+            elif btype == "text":
+                text_value = block.get("text", "")
+                if text_value:
+                    rendered.append({"type": "text", "text": text_value})
+            # Skip tool_use / tool_result / unknown block types — they
+            # belong to internal agent flow, not user-visible content.
+        return rendered
+
     def add_user_message(
         self,
         project_id: str,
         chat_id: str,
-        content: str
+        content: Any,
     ) -> Optional[Dict[str, Any]]:
         """
         Add a user message to a chat.
 
-        Educational Note: Convenience method for the common case of
-        adding a simple text message from the user.
-
         Args:
             project_id: The project UUID
             chat_id: The chat UUID
-            content: The user's message text
+            content: Either a plain text string (legacy / no-attachment
+                path) or a list of content blocks `[{type:"image",
+                storage_path:...}, {type:"text", text:"..."}]` for
+                messages with inline image attachments. Both shapes
+                round-trip through JSONB storage and re-emerge correctly
+                via `_format_message_for_frontend` and
+                `build_api_messages`.
 
         Returns:
             The created message dict
@@ -351,6 +414,11 @@ class MessageService:
             else:
                 api_content = content
 
+            # Persisted image blocks reference {storage_path, media_type, ...}
+            # — Claude's vision API needs base64-inline source. Rewrite
+            # before sending. No-op for messages that have no image blocks.
+            api_content = self._rewrite_image_blocks_for_claude(api_content)
+
             api_messages.append({
                 "role": msg["role"],
                 "content": api_content
@@ -396,6 +464,52 @@ class MessageService:
             api_messages.pop(0)
 
         return api_messages
+
+    def _rewrite_image_blocks_for_claude(self, content: Any) -> Any:
+        """
+        Translate persisted image blocks (`{type:"image", storage_path:...}`)
+        into Anthropic's vision content shape:
+        `{type:"image", source:{type:"base64", media_type, data}}`.
+
+        Non-list content and lists without image blocks pass through
+        unchanged so the existing tool-use plumbing still works.
+
+        Failure mode: if a referenced attachment can't be downloaded, the
+        image block is dropped (logged) rather than crashing the whole
+        request — Claude still gets the user's text.
+        """
+        if not isinstance(content, list):
+            return content
+        if not any(
+            isinstance(b, dict) and b.get("type") == "image" and b.get("storage_path")
+            for b in content
+        ):
+            return content
+
+        from app.services.integrations.supabase import storage_service
+
+        rewritten: List[Any] = []
+        for block in content:
+            if not isinstance(block, dict):
+                rewritten.append(block)
+                continue
+            if block.get("type") == "image" and block.get("storage_path"):
+                data = storage_service.download_chat_attachment(block["storage_path"])
+                if data is None:
+                    # Already-logged in storage_service; just skip the image
+                    # so the rest of the message still goes through.
+                    continue
+                rewritten.append({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": block.get("media_type", "image/png"),
+                        "data": base64.standard_b64encode(data).decode("ascii"),
+                    },
+                })
+            else:
+                rewritten.append(block)
+        return rewritten
 
     def _sanitize_tool_sequences(self, api_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """

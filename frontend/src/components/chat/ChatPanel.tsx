@@ -498,17 +498,34 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     // typed-block list using local blob URLs so the screenshot appears in
     // the bubble before the network roundtrip — replaceTempWithCanonical
     // swaps in server-signed URLs once the backend persists.
+    //
+    // Memory management: each blob URL pins the underlying File data in
+    // browser memory until URL.revokeObjectURL() runs. We track the URLs
+    // created here and revoke them in three places: (a) when the canonical
+    // user message arrives with server-signed URLs (the local blobs are no
+    // longer rendered), (b) when the temp message is removed on send
+    // failure, (c) in the finally block as a defence-in-depth catch-all.
+    const optimisticBlobUrls: string[] = [];
     const optimisticContent = messageAttachments.length
       ? [
-          ...messageAttachments.map((file) => ({
-            type: 'image' as const,
-            url: URL.createObjectURL(file),
-            media_type: file.type,
-            filename: file.name,
-          })),
+          ...messageAttachments.map((file) => {
+            const blobUrl = URL.createObjectURL(file);
+            optimisticBlobUrls.push(blobUrl);
+            return {
+              type: 'image' as const,
+              url: blobUrl,
+              media_type: file.type,
+              filename: file.name,
+            };
+          }),
           { type: 'text' as const, text: userMessage },
         ]
       : userMessage;
+    const revokeOptimisticBlobs = () => {
+      for (const url of optimisticBlobUrls.splice(0)) {
+        URL.revokeObjectURL(url);
+      }
+    };
 
     const tempUserMessage = {
       id: `temp-${Date.now()}`,
@@ -543,6 +560,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           messages: alreadyPresent ? nextMessages : [...nextMessages.filter((msg) => msg.id !== tempUserMessage.id), canonicalUserMessage],
         };
       });
+      // The canonical message renders from server-signed URLs now, so the
+      // local blob URLs are no longer referenced by the DOM. Revoke to free
+      // the underlying File buffers.
+      revokeOptimisticBlobs();
     };
 
     const appendAssistantMessage = (assistantMessage: Chat['messages'][number]) => {
@@ -715,6 +736,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     } finally {
       onRemoveSendingChat(sendingChatId);
       abortControllerRef.current = null;
+      // Defence-in-depth: if neither the success path nor any catch
+      // branch ran (shouldn't happen in normal control flow, but JS
+      // exception edges exist), still free the optimistic blob URLs.
+      // No-op if already revoked above.
+      revokeOptimisticBlobs();
     }
   };
 

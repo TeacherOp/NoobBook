@@ -27,9 +27,22 @@ VALUES (
 -- ============================================================================
 -- STORAGE POLICIES
 -- ============================================================================
--- Mirrors the raw-files / brand-assets pattern. Backend uploads/reads using
--- the service key (bypasses RLS); these policies are for direct user-token
--- access (e.g., a future feature that lets the frontend upload directly).
+-- Mirrors the raw-files / brand-assets pattern intentionally. Important
+-- nuance: the path layout we actually upload is
+--   {project_id}/{chat_id}/{attachment_id}/{filename}
+-- so `(storage.foldername(name))[1]` resolves to project_id, NOT user_id.
+-- The `auth.uid()::text = first_folder` check below therefore *cannot*
+-- match for user-token access — by design.
+--
+-- This is consistent with the existing buckets (raw-files in
+-- 00002_storage_buckets.sql, brand-assets in 00007_brand_assets.sql)
+-- which have the same shape. The backend always reads/writes with the
+-- service key (bypassing RLS) and hands the browser short-lived signed
+-- URLs that don't go through these policies. Direct user-token uploads
+-- aren't a feature today; if/when that lands, swap the path prefix to
+-- {user_id}/{project_id}/{chat_id}/... so this policy actually grants
+-- access (matching the convention encoded in
+-- generate_raw_file_path / generate_brand_asset_path).
 
 CREATE POLICY "Users can upload chat attachments to own projects"
 ON storage.objects FOR INSERT

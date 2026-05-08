@@ -89,6 +89,21 @@ def _parse_message_request(project_id: str, chat_id: str) -> Tuple[Any, Union[Tu
             "error": f"Maximum {_MAX_ATTACHMENTS_PER_MESSAGE} attachments per message.",
         }), 400)
 
+    # Track every successfully-uploaded path so we can roll them back on
+    # any later failure in this loop. Without this, a partial failure
+    # (e.g. file 1 uploads, file 2 fails MIME check) would orphan file 1
+    # in the bucket — invisible until cascade-delete on chat removal.
+    uploaded_paths: List[str] = []
+
+    def _rollback_uploaded() -> None:
+        for path in uploaded_paths:
+            try:
+                storage_service.delete_chat_attachment(path)
+            except Exception:  # pragma: no cover — best-effort cleanup
+                current_app.logger.warning(
+                    "Rollback failed for chat attachment %s", path,
+                )
+
     attachment_blocks: List[dict] = []
     for upload in upload_files:
         mime = (upload.content_type or "").lower()
@@ -96,6 +111,7 @@ def _parse_message_request(project_id: str, chat_id: str) -> Tuple[Any, Union[Tu
         if mime == "image/jpg":
             mime = "image/jpeg"
         if mime not in _ALLOWED_ATTACHMENT_MIMES:
+            _rollback_uploaded()
             return None, (jsonify({
                 "success": False,
                 "error": f"Unsupported image format ({mime or 'unknown'}). Allowed: PNG, JPEG, WebP, GIF.",
@@ -103,8 +119,10 @@ def _parse_message_request(project_id: str, chat_id: str) -> Tuple[Any, Union[Tu
 
         data_bytes = upload.read()
         if not data_bytes:
+            _rollback_uploaded()
             return None, (jsonify({"success": False, "error": "Empty attachment."}), 400)
         if len(data_bytes) > _MAX_ATTACHMENT_BYTES:
+            _rollback_uploaded()
             return None, (jsonify({
                 "success": False,
                 "error": f"Image exceeds {_MAX_ATTACHMENT_BYTES // (1024*1024)}MB limit.",
@@ -123,8 +141,10 @@ def _parse_message_request(project_id: str, chat_id: str) -> Tuple[Any, Union[Tu
             content_type=mime,
         )
         if not storage_path:
+            _rollback_uploaded()
             return None, (jsonify({"success": False, "error": "Failed to store attachment."}), 500)
 
+        uploaded_paths.append(storage_path)
         attachment_blocks.append({
             "type": "image",
             "storage_path": storage_path,

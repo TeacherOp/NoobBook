@@ -662,6 +662,22 @@ def get_chat_attachment_url(path: str, expires_in: int = 3600) -> Optional[str]:
         return None
 
 
+def delete_chat_attachment(path: str) -> bool:
+    """
+    Delete a single chat attachment by its full storage path. Used for
+    rollback when the message-stream multipart upload fails partway —
+    so a failed third-of-three upload doesn't leak the first two.
+    Returns True on success / not-found, False on a real error.
+    """
+    client = _get_client()
+    try:
+        client.storage.from_(BUCKET_CHAT_ATTACHMENTS).remove([path])
+        return True
+    except Exception as e:
+        logger.error("Failed to delete chat attachment %s: %s", path, e)
+        return False
+
+
 def delete_chat_attachments_for_chat(project_id: str, chat_id: str) -> bool:
     """
     Cascade-delete every attachment under a chat's prefix. Called from

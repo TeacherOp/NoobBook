@@ -556,6 +556,34 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           onCostsChange?.();
           await reconcileChatMetadata(currentChat.id);
         }
+      } else {
+        // Stream closed cleanly but neither `assistant_done` nor `error`
+        // arrived. The most common cause is an upstream proxy (frontend
+        // nginx, Coolify Traefik) FIN'ing the connection during a long
+        // tool-use gap — the backend has already persisted the assistant
+        // message via main_chat_service, so a refetch surfaces it without
+        // re-running the model. Without this branch the UI stuck on the
+        // Reading Beat until the user manually refreshed (#item-still-not-
+        // working repro from prod logs showed 407s / 523s / 658s streams).
+        log.warn(
+          {
+            chatId: currentChat.id,
+            hadUserMessage: streamResult.hadUserMessage,
+            hadAssistantDelta: streamResult.hadAssistantDelta,
+          },
+          'stream ended without terminal event — recovering from server',
+        );
+        setStreamingAssistantContent('');
+        try {
+          await loadFullChat(currentChat.id);
+          onCostsChange?.();
+          await loadUserUsage();
+        } catch (recoveryErr) {
+          log.error({ err: recoveryErr }, 'recovery refetch failed');
+          errorWithLogs(
+            'Connection dropped before the response arrived. Refresh to load it.',
+          );
+        }
       }
     } catch (err) {
       // Don't show error toast if user intentionally stopped
@@ -578,8 +606,23 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             errorWithLogs('Failed to send message');
           }
         } else {
-          log.error({ err }, 'failed to send message');
-          errorWithLogs('Failed to send message');
+          // Stream errored mid-flight after delivering partial events
+          // (canonical user_message and/or assistant_delta). Re-sending
+          // via the REST fallback would duplicate the user's message —
+          // recover by re-fetching the chat instead. The backend's
+          // exception handler in main_chat_service already persists an
+          // error-marked assistant message before the SSE error event,
+          // so the refetch should surface either the partial response
+          // or a recorded failure the user can retry from.
+          log.warn({ err }, 'stream errored after partial events — recovering from server');
+          try {
+            await loadFullChat(currentChat.id);
+            onCostsChange?.();
+            await loadUserUsage();
+          } catch (recoveryErr) {
+            log.error({ err: recoveryErr }, 'recovery refetch failed');
+            errorWithLogs('Failed to send message');
+          }
         }
       }
       setStreamingAssistantContent('');

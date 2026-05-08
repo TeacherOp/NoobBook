@@ -562,13 +562,20 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         Array.isArray(canonicalUserMessage.content) &&
         optimisticBlobUrls.length > 0
       ) {
-        let blobIdx = 0;
-        const mergedContent = (canonicalUserMessage.content as Array<{ type: string; url?: string }>).map(
+        // Build a filename → blobUrl lookup from the optimistic blocks so
+        // the merge is order-independent (the server may return image blocks
+        // in a different sequence than the client built them).
+        const blobByFilename = new Map<string, string>();
+        optimisticContent.forEach((block) => {
+          if (typeof block === 'object' && block.type === 'image' && block.filename && block.url) {
+            if (!blobByFilename.has(block.filename)) blobByFilename.set(block.filename, block.url);
+          }
+        });
+        const mergedContent = (canonicalUserMessage.content as Array<{ type: string; url?: string; filename?: string }>).map(
           (block) => {
-            if (block.type === 'image' && optimisticBlobUrls[blobIdx]) {
-              const blobUrl = optimisticBlobUrls[blobIdx];
-              blobIdx += 1;
-              return { ...block, url: blobUrl };
+            if (block.type === 'image' && block.filename) {
+              const blobUrl = blobByFilename.get(block.filename);
+              if (blobUrl) return { ...block, url: blobUrl };
             }
             return block;
           },

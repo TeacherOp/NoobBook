@@ -13,8 +13,15 @@ from unittest.mock import patch
 
 import pytest
 
+from app.services.background_services import task_service
 from app.services.studio_services import studio_index_service
 from app.services.studio_services.studio_index_service import StudioJobCancelled
+
+
+# task_service.is_target_cancelled is a METHOD on the singleton instance,
+# not a module-level function — so the string-path `patch("...task_service.
+# is_target_cancelled")` fails to resolve. patch.object on the singleton is
+# the correct mock for these tests.
 
 
 # ==========================================================================
@@ -26,9 +33,8 @@ class TestRaiseIfCancelled:
 
     def test_no_cancel_is_noop(self):
         """Neither signal active → raise_if_cancelled returns silently."""
-        with patch(
-            "app.services.background_services.task_service.is_target_cancelled",
-            return_value=False,
+        with patch.object(
+            task_service, "is_target_cancelled", return_value=False,
         ), patch(
             "app.services.studio_services.studio_index_service.get_job",
             return_value={"status": "processing"},
@@ -37,9 +43,8 @@ class TestRaiseIfCancelled:
 
     def test_in_memory_set_trips(self):
         """task_service._cancelled_tasks set hit → raises immediately."""
-        with patch(
-            "app.services.background_services.task_service.is_target_cancelled",
-            return_value=True,
+        with patch.object(
+            task_service, "is_target_cancelled", return_value=True,
         ), patch(
             "app.services.studio_services.studio_index_service.get_job",
             return_value={"status": "processing"},
@@ -51,9 +56,8 @@ class TestRaiseIfCancelled:
         """In-memory set miss but DB row says cancelled → still raises.
         Covers the cross-process case (cancel issued from a different
         pod / after a worker restart)."""
-        with patch(
-            "app.services.background_services.task_service.is_target_cancelled",
-            return_value=False,
+        with patch.object(
+            task_service, "is_target_cancelled", return_value=False,
         ), patch(
             "app.services.studio_services.studio_index_service.get_job",
             return_value={"status": "cancelled"},
@@ -65,9 +69,8 @@ class TestRaiseIfCancelled:
         """get_job returns None (job deleted concurrently) → don't raise.
         The route would have returned 404 to the user; the worker should
         finish or fail naturally rather than throwing on a phantom cancel."""
-        with patch(
-            "app.services.background_services.task_service.is_target_cancelled",
-            return_value=False,
+        with patch.object(
+            task_service, "is_target_cancelled", return_value=False,
         ), patch(
             "app.services.studio_services.studio_index_service.get_job",
             return_value=None,

@@ -443,15 +443,26 @@ def get_job(
 def list_jobs(
     project_id: str,
     job_type: str,
-    source_id: Optional[str] = None
+    source_id: Optional[str] = None,
+    include_cancelled: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     List studio jobs by type, optionally filtered by source.
+
+    Cancelled jobs are filtered out by default — they have no usable
+    output (the worker bailed before persisting anything visible) and
+    showing them in the user-facing studio-output tab as "iteration N"
+    rows confused users into thinking the cancel didn't take effect.
+    Callers that genuinely want the audit trail can pass
+    ``include_cancelled=True``.
 
     Args:
         project_id: The project UUID
         job_type: Job type string
         source_id: Optional source UUID to filter by
+        include_cancelled: When True, include rows with status="cancelled".
+            Default False so the studio-output tab and bootstrap call
+            don't surface ghost iterations.
 
     Returns:
         List of job records (flattened), newest first
@@ -467,6 +478,8 @@ def list_jobs(
         )
         if source_id:
             query = query.eq("source_id", source_id)
+        if not include_cancelled:
+            query = query.neq("status", "cancelled")
 
         response = query.execute()
         return [_map_job(row) for row in (response.data or [])]
@@ -475,22 +488,32 @@ def list_jobs(
         return []
 
 
-def list_jobs_grouped(project_id: str) -> Dict[str, List[Dict[str, Any]]]:
+def list_jobs_grouped(
+    project_id: str,
+    include_cancelled: bool = False,
+) -> Dict[str, List[Dict[str, Any]]]:
     """
     List all studio jobs for a project, grouped by job_type.
 
     Educational Note: This supports Studio bootstrap without issuing one
     request per section. Callers can filter by source client-side.
+
+    Cancelled jobs are filtered out by default for the same reason
+    list_jobs does — they have no usable output and showing them as
+    iteration rows in the studio-output tab confused users into thinking
+    the Stop button didn't take effect.
     """
     try:
         client = _get_client()
-        response = (
+        query = (
             client.table("studio_jobs")
             .select("*")
             .eq("project_id", project_id)
             .order("created_at", desc=True)
-            .execute()
         )
+        if not include_cancelled:
+            query = query.neq("status", "cancelled")
+        response = query.execute()
 
         grouped: Dict[str, List[Dict[str, Any]]] = {}
         for row in (response.data or []):

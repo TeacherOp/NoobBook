@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import {
   Dialog,
@@ -243,17 +243,21 @@ export const SharingModal: React.FC<SharingModalProps> = ({
     }
   };
 
-  const handleCopy = async (share: ProjectShare) => {
+  const handleCopy = async (share: ProjectShare, selectFallback: () => void) => {
     // copyToClipboard handles the modern Clipboard API + the legacy
     // execCommand fallback for non-HTTPS / unfocused contexts where
     // navigator.clipboard.writeText throws (the original failure mode here).
+    // When BOTH paths fail (some browsers block execCommand inside Radix
+    // portals, Safari iOS, strict Firefox), we surface the row's URL input
+    // pre-selected so the user can hit Cmd/Ctrl-C immediately.
     const ok = await copyToClipboard(share.url);
     if (ok) {
       setCopiedId(share.id);
       success('Link copied');
       setTimeout(() => setCopiedId((id) => (id === share.id ? null : id)), 1600);
     } else {
-      error('Could not copy. Select the URL manually.');
+      selectFallback();
+      error("Couldn't auto-copy — URL is selected, press Cmd/Ctrl-C.");
     }
   };
 
@@ -526,7 +530,7 @@ const EmptyState: React.FC = () => (
 interface ShareRowProps {
   share: ProjectShare;
   copied: boolean;
-  onCopy: (s: ProjectShare) => void;
+  onCopy: (s: ProjectShare, selectFallback: () => void) => void;
   onRevoke: (s: ProjectShare) => void;
   staggerMs: number;
 }
@@ -535,6 +539,19 @@ const ShareRow: React.FC<ShareRowProps> = ({ share, copied, onCopy, onRevoke, st
   const inactive = !share.is_active;
   const inactiveLabel = share.revoked_at ? 'Revoked' : 'Expired';
   const expiryLabel = formatExpiry(share);
+
+  // Per-row input ref — surfaces the full URL as selectable DOM text so
+  // users can manually copy (Cmd/Ctrl-C) when the Clipboard API path fails.
+  // The handler also auto-selects after a failed Copy click.
+  const urlInputRef = useRef<HTMLInputElement | null>(null);
+  const selectUrl = () => {
+    const el = urlInputRef.current;
+    if (!el) return;
+    el.focus();
+    // setSelectionRange is the cross-platform-safe variant; .select() flakes
+    // on some mobile browsers when the input has just received focus.
+    el.setSelectionRange(0, el.value.length);
+  };
 
   return (
     <div
@@ -565,14 +582,26 @@ const ShareRow: React.FC<ShareRowProps> = ({ share, copied, onCopy, onRevoke, st
           )}
         </span>
 
-        {/* URL + metadata */}
+        {/* URL + metadata. The URL is rendered as a read-only <input> (not a
+            <span>) so users can manually triple-click + copy on browsers
+            where the Clipboard API and its execCommand fallback both fail
+            (Safari iOS, strict Firefox, sandboxed iframes). The value is the
+            full URL with scheme — the input scrolls horizontally if needed,
+            but selection always covers the entire string. */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
-            <span className="font-mono truncate" title={share.url}>
-              {compactUrl(share.url)}
-            </span>
+            <input
+              ref={urlInputRef}
+              readOnly
+              value={share.url}
+              onClick={selectUrl}
+              onFocus={selectUrl}
+              title={share.url}
+              aria-label="Share link URL"
+              className="flex-1 min-w-0 truncate font-mono text-[11px] text-muted-foreground bg-transparent border-0 outline-none p-0 m-0 h-auto leading-normal focus-visible:ring-0 focus-visible:ring-offset-0 focus:text-foreground cursor-text"
+            />
             {inactive && (
-              <span className="px-1.5 py-px rounded text-[10px] font-medium uppercase tracking-wide bg-stone-200/70 text-stone-700 dark:bg-stone-800/70 dark:text-stone-300">
+              <span className="flex-shrink-0 px-1.5 py-px rounded text-[10px] font-medium uppercase tracking-wide bg-stone-200/70 text-stone-700 dark:bg-stone-800/70 dark:text-stone-300">
                 {inactiveLabel}
               </span>
             )}
@@ -603,7 +632,7 @@ const ShareRow: React.FC<ShareRowProps> = ({ share, copied, onCopy, onRevoke, st
           <Button
             variant={copied ? 'secondary' : 'outline'}
             size="sm"
-            onClick={() => onCopy(share)}
+            onClick={() => onCopy(share, selectUrl)}
             disabled={inactive}
             className="h-7 px-2.5 gap-1.5 text-xs"
             aria-label="Copy link"
@@ -656,17 +685,6 @@ const shareRowKeyframes = `
   to   { opacity: 1; transform: translateY(0); }
 }
 `;
-
-function compactUrl(url: string): string {
-  // Show only the last meaningful segment so the row stays tidy at any width.
-  // e.g. https://app.example.com/share/AbC123 → /share/AbC123
-  try {
-    const u = new URL(url);
-    return `${u.host}${u.pathname}`;
-  } catch {
-    return url;
-  }
-}
 
 function formatExpiry(share: ProjectShare): string {
   if (share.revoked_at) return 'Revoked';

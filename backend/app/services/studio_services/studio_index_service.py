@@ -228,20 +228,43 @@ def update_job(
                     job_data_updates[k] = v
 
         # Clobber-protection: refuse terminal-status writes that would
-        # overwrite an already-cancelled row. Limited to ready / error
-        # because those are the writes that actually conflict with
-        # cancelled — progress-only updates and the (rare) intermediate
-        # status="processing" writes don't need the extra DB read.
-        # Studio workers also bail at the next raise_if_cancelled check
-        # anyway, so this is the belt-and-braces backstop for races where
-        # the worker had already issued the write.
+        # overwrite a *different* terminal status. Two distinct races
+        # are covered, both at the millisecond boundary:
+        #
+        #   ready / error → cancelled  (worker raced the cancel)
+        #     The cancel route signalled but the worker had already
+        #     queued its terminal write. Without this guard the worker's
+        #     update_job(status="ready") would silently overwrite the
+        #     cancelled marker and the job would re-appear ready.
+        #
+        #   cancelled → ready / error  (user raced the worker)
+        #     The worker finished and wrote status="ready" in the gap
+        #     between the cancel route's initial get_job (which saw
+        #     "processing", so it didn't take the already-terminal early
+        #     exit) and its own update_job(status="cancelled"). Without
+        #     this guard the cancel route would silently flip a
+        #     completed job to cancelled, hiding output the user
+        #     already paid for.
+        #
+        # Only terminal-status writes go through the check (ready, error,
+        # cancelled). Progress-only updates and intermediate
+        # status="processing" updates don't need the extra DB read —
+        # they can't conflict with terminal markers semantically.
         new_status = top_level.get("status")
-        if new_status in {"ready", "error"}:
+        if new_status in {"ready", "error", "cancelled"}:
             current_for_clobber = get_job(project_id, job_id)
-            if current_for_clobber and current_for_clobber.get("status") == "cancelled":
+            current_status = (current_for_clobber or {}).get("status")
+            # Block any cross-terminal overwrite (e.g. ready→cancelled,
+            # cancelled→ready). Same-status writes (idempotent re-cancel,
+            # ready→ready on a retry) pass through to the normal write
+            # path so updated_at / progress fields can still be touched.
+            if (
+                current_status in {"ready", "error", "cancelled"}
+                and current_status != new_status
+            ):
                 logger.info(
-                    "Refusing to overwrite cancelled status on job %s (would have gone to %s)",
-                    job_id, new_status,
+                    "Refusing to overwrite %s status on job %s (would have gone to %s)",
+                    current_status, job_id, new_status,
                 )
                 return current_for_clobber
 

@@ -183,6 +183,47 @@ class TestUpdateJobClobberProtection:
         assert result == cancelled_row
         mock_client.assert_not_called()
 
+    def test_refuses_to_overwrite_ready_with_cancelled(self):
+        """Race: worker finished and wrote status='ready' in the gap
+        between the cancel route's initial get_job (saw 'processing',
+        so it didn't early-exit) and its update_job(status='cancelled').
+        Without this guard the cancel route would silently flip a
+        completed job to cancelled, hiding output the user already paid
+        for."""
+        ready_row = {"id": "j1", "project_id": "p1", "status": "ready",
+                     "audio_url": "/api/v1/.../out.mp3"}
+        with patch(
+            "app.services.studio_services.studio_index_service.get_job",
+            return_value=ready_row,
+        ), patch(
+            "app.services.studio_services.studio_index_service._get_client"
+        ) as mock_client:
+            result = studio_index_service.update_job(
+                "p1", "j1",
+                status="cancelled",
+                error="Cancelled by user",
+            )
+        assert result == ready_row
+        mock_client.assert_not_called()
+
+    def test_refuses_to_overwrite_error_with_cancelled(self):
+        """Same race as above, just with the worker error path. A
+        cancel arriving immediately after a real failure shouldn't
+        relabel the failure as a user cancellation."""
+        error_row = {"id": "j1", "project_id": "p1", "status": "error",
+                     "error_message": "API timeout"}
+        with patch(
+            "app.services.studio_services.studio_index_service.get_job",
+            return_value=error_row,
+        ), patch(
+            "app.services.studio_services.studio_index_service._get_client"
+        ) as mock_client:
+            result = studio_index_service.update_job(
+                "p1", "j1", status="cancelled",
+            )
+        assert result == error_row
+        mock_client.assert_not_called()
+
     def test_allows_re_cancel_idempotent(self):
         """Updating cancelled → cancelled is allowed (idempotent re-cancel
         from the route, e.g. the user double-clicked Stop)."""

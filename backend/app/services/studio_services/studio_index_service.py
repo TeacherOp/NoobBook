@@ -84,14 +84,19 @@ def is_job_cancelled(project_id: str, job_id: str) -> bool:
     """
     Check whether a studio job has been cancelled. Two-source check:
 
-    1. ``task_service._cancelled_tasks`` set (in-memory, microsecond-fast,
-       set synchronously by the cancel route so the very next worker
-       breakpoint sees it).
-    2. ``studio_jobs.status`` (database, durable across process restarts
-       and visible to other pods if we ever scale out).
+    1. ``task_service.is_target_cancelled(job_id)`` — looks up
+       background_tasks rows for this target and intersects against the
+       in-memory ``_cancelled_tasks`` set the cancel route writes to.
+       Note: despite the in-memory set being O(1), this call still
+       issues a DB query (``get_tasks_for_target`` does a SELECT). The
+       set just decides which fetched row counts as cancelled.
+    2. ``studio_jobs.status`` (durable across process restarts and
+       visible to other pods if we ever scale out).
 
-    Cheap to call at every breakpoint — one in-memory set check + at
-    most one row read.
+    Net cost per breakpoint: two cheap row reads. Acceptable because
+    studio breakpoints fire at well-defined boundaries (start of worker,
+    between loop iterations, before external API calls), not in tight
+    loops — typically a handful per job, never thousands.
     """
     # Local import to avoid a cycle: task_service is fine to import at
     # module load, but doing it lazily here keeps the dependency graph
@@ -205,9 +210,10 @@ def update_job(
         Updated job record (flattened) or None if not found
     """
     try:
-        client = _get_client()
-
-        # Separate top-level columns from job_data fields
+        # Separate top-level columns from job_data fields. We do this
+        # BEFORE _get_client() so the clobber-check below can short-
+        # circuit without spinning up a Supabase client when the write
+        # is going to be no-op'd anyway.
         top_level = {}
         job_data_updates = {}
 
@@ -221,13 +227,16 @@ def update_job(
                 else:
                     job_data_updates[k] = v
 
-        # Clobber-protection: if the row is already cancelled, refuse any
-        # non-cancelled status update. This is the belt-and-braces guard
-        # for any studio service that raced the cancel and didn't see the
-        # raise_if_cancelled trip — its update_job(status="ready") gets
-        # silently no-op'd here so the cancelled marker survives.
+        # Clobber-protection: refuse terminal-status writes that would
+        # overwrite an already-cancelled row. Limited to ready / error
+        # because those are the writes that actually conflict with
+        # cancelled — progress-only updates and the (rare) intermediate
+        # status="processing" writes don't need the extra DB read.
+        # Studio workers also bail at the next raise_if_cancelled check
+        # anyway, so this is the belt-and-braces backstop for races where
+        # the worker had already issued the write.
         new_status = top_level.get("status")
-        if new_status and new_status != "cancelled":
+        if new_status in {"ready", "error"}:
             current_for_clobber = get_job(project_id, job_id)
             if current_for_clobber and current_for_clobber.get("status") == "cancelled":
                 logger.info(
@@ -235,6 +244,8 @@ def update_job(
                     job_id, new_status,
                 )
                 return current_for_clobber
+
+        client = _get_client()
 
         # Merge job_data updates via fetch-merge-update
         if job_data_updates:
@@ -311,28 +322,34 @@ def with_failure_guard(callable_func):
                 job_id, getattr(callable_func, "__name__", "unknown"), exc,
             )
             # Defensive: if the job was cancelled mid-flight and the worker
-            # crashed instead of cooperatively stopping, still don't
-            # overwrite the cancelled marker.
+            # crashed instead of cooperatively stopping, skip the error
+            # write so we don't clobber the cancelled marker. The outer
+            # `raise` below propagates the original exception either way.
+            #
+            # No nested try/except here on purpose — an earlier draft used
+            # a bare `raise` inside an inner `if is_job_cancelled` branch
+            # and got it caught by the inner `except Exception`, which
+            # then logged "Failed to mark as error after crash" spuriously
+            # on every crash-after-cancel race. Two ERROR logs per crash
+            # is real production noise; the flat structure here avoids it.
             if project_id and job_id:
-                try:
-                    if is_job_cancelled(project_id, job_id):
-                        logger.info(
-                            "Studio job %s crashed while cancelled — preserving cancelled status",
-                            job_id,
+                if is_job_cancelled(project_id, job_id):
+                    logger.info(
+                        "Studio job %s crashed while cancelled — preserving cancelled status",
+                        job_id,
+                    )
+                else:
+                    try:
+                        update_job(
+                            project_id, job_id,
+                            status="error",
+                            error=f"Generation failed: {exc}",
+                            completed_at=datetime.now().isoformat(),
                         )
-                        raise
-                    update_job(
-                        project_id, job_id,
-                        status="error",
-                        error=f"Generation failed: {exc}",
-                        completed_at=datetime.now().isoformat(),
-                    )
-                except StudioJobCancelled:
-                    raise
-                except Exception:
-                    logger.exception(
-                        "Failed to mark studio job %s as error after crash", job_id,
-                    )
+                    except Exception:
+                        logger.exception(
+                            "Failed to mark studio job %s as error after crash", job_id,
+                        )
             raise
 
     wrapped.__name__ = getattr(callable_func, "__name__", "wrapped_studio_job")

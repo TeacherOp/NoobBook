@@ -51,6 +51,67 @@ _TOP_COLUMNS = {
 }
 
 
+# ──────────────────────────────────────────────────────────────────────
+# Cooperative cancellation
+# ──────────────────────────────────────────────────────────────────────
+# Studio jobs run inside ThreadPoolExecutor workers (task_service.submit_task).
+# When the user clicks Stop in the ActiveTasksBar, the cancel route
+# (api/studio/job_actions.py) does TWO things:
+#
+#   1. Flips studio_jobs.status = "cancelled" so the active-tasks endpoint
+#      stops listing the row (the user-facing affordance).
+#   2. Calls task_service.cancel_tasks_for_target(job_id), adding the
+#      worker's task_id to the in-memory _cancelled_tasks set.
+#
+# Each studio service's entry function (the one wrapped by
+# with_failure_guard) sprinkles `raise_if_cancelled(project_id, job_id)`
+# at its natural breakpoints — start, between loop iterations, before
+# each external API call, before final persist. When ANY breakpoint
+# trips, the service raises StudioJobCancelled and bails cleanly without
+# spending more on Claude / ElevenLabs / VEO / Gemini Imagen.
+#
+# Belt-and-braces: with_failure_guard catches StudioJobCancelled
+# specifically and DOES NOT overwrite the cancelled marker; update_job
+# refuses any non-cancelled status update over an already-cancelled row.
+
+class StudioJobCancelled(Exception):
+    """Raised by studio workers when the user has cancelled the job.
+    Caught at the route boundary; with_failure_guard does NOT re-flip
+    the row to status='error' for this exception type."""
+
+
+def is_job_cancelled(project_id: str, job_id: str) -> bool:
+    """
+    Check whether a studio job has been cancelled. Two-source check:
+
+    1. ``task_service._cancelled_tasks`` set (in-memory, microsecond-fast,
+       set synchronously by the cancel route so the very next worker
+       breakpoint sees it).
+    2. ``studio_jobs.status`` (database, durable across process restarts
+       and visible to other pods if we ever scale out).
+
+    Cheap to call at every breakpoint — one in-memory set check + at
+    most one row read.
+    """
+    # Local import to avoid a cycle: task_service is fine to import at
+    # module load, but doing it lazily here keeps the dependency graph
+    # explicit and matches how source workers (pdf_service, etc.) use it.
+    from app.services.background_services import task_service
+
+    if task_service.is_target_cancelled(job_id):
+        return True
+
+    job = get_job(project_id, job_id)
+    return bool(job and job.get("status") == "cancelled")
+
+
+def raise_if_cancelled(project_id: str, job_id: str) -> None:
+    """Convenience wrapper. Studio services call this between long-running
+    steps. Raises StudioJobCancelled when the user has clicked Stop."""
+    if is_job_cancelled(project_id, job_id):
+        raise StudioJobCancelled(f"Studio job {job_id} cancelled by user")
+
+
 def _get_client():
     """Get Supabase client, raising error if not configured."""
     if not is_supabase_enabled():
@@ -160,6 +221,21 @@ def update_job(
                 else:
                     job_data_updates[k] = v
 
+        # Clobber-protection: if the row is already cancelled, refuse any
+        # non-cancelled status update. This is the belt-and-braces guard
+        # for any studio service that raced the cancel and didn't see the
+        # raise_if_cancelled trip — its update_job(status="ready") gets
+        # silently no-op'd here so the cancelled marker survives.
+        new_status = top_level.get("status")
+        if new_status and new_status != "cancelled":
+            current_for_clobber = get_job(project_id, job_id)
+            if current_for_clobber and current_for_clobber.get("status") == "cancelled":
+                logger.info(
+                    "Refusing to overwrite cancelled status on job %s (would have gone to %s)",
+                    job_id, new_status,
+                )
+                return current_for_clobber
+
         # Merge job_data updates via fetch-merge-update
         if job_data_updates:
             current = get_job(project_id, job_id)
@@ -218,19 +294,41 @@ def with_failure_guard(callable_func):
         job_id = kwargs.get("job_id")
         try:
             return callable_func(*args, **kwargs)
+        except StudioJobCancelled:
+            # Cancellation is not a crash. The cancel route already wrote
+            # status='cancelled' and the worker bailed cleanly. Don't
+            # overwrite to 'error'. Re-raise so task_service still records
+            # the background_tasks row's status as cancelled (its own
+            # finally block reads exception type).
+            logger.info(
+                "Studio job %s cancelled by user — preserving cancelled status",
+                job_id,
+            )
+            raise
         except Exception as exc:  # noqa: BLE001 — re-raised below
             logger.exception(
                 "Studio job %s (%s) crashed: %s",
                 job_id, getattr(callable_func, "__name__", "unknown"), exc,
             )
+            # Defensive: if the job was cancelled mid-flight and the worker
+            # crashed instead of cooperatively stopping, still don't
+            # overwrite the cancelled marker.
             if project_id and job_id:
                 try:
+                    if is_job_cancelled(project_id, job_id):
+                        logger.info(
+                            "Studio job %s crashed while cancelled — preserving cancelled status",
+                            job_id,
+                        )
+                        raise
                     update_job(
                         project_id, job_id,
                         status="error",
                         error=f"Generation failed: {exc}",
                         completed_at=datetime.now().isoformat(),
                     )
+                except StudioJobCancelled:
+                    raise
                 except Exception:
                     logger.exception(
                         "Failed to mark studio job %s as error after crash", job_id,

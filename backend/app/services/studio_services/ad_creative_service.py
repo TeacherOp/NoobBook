@@ -75,6 +75,10 @@ class AdCreativeService:
             started_at=datetime.now().isoformat()
         )
 
+        # Cancellation breakpoint #1: at worker start, before any prompt
+        # building or image-gen API call.
+        studio_index_service.raise_if_cancelled(project_id, job_id)
+
         # Step 1: Build image prompts from the user's direction directly.
         # We used to ask Haiku to fan the user prompt out into three
         # different angles (hero / lifestyle / aspirational), but that
@@ -114,6 +118,11 @@ class AdCreativeService:
         all_images = []
 
         for i, prompt_data in enumerate(prompts):
+            # Cancellation breakpoint inside the image-gen loop. Each
+            # iteration = one Imagen call (real money). Bails before
+            # the next variation is generated.
+            studio_index_service.raise_if_cancelled(project_id, job_id)
+
             prompt_type = prompt_data.get("type", f"image_{i+1}")
             prompt_text = prompt_data.get("prompt", "")
 

@@ -21,6 +21,7 @@ import {
 } from '@phosphor-icons/react';
 import { API_BASE_URL } from '@/lib/api/client';
 import { sourcesAPI } from '@/lib/api/sources';
+import { cancelStudioJob } from '@/lib/api/studio';
 import axios from 'axios';
 
 interface ActiveTask {
@@ -58,8 +59,14 @@ const TASK_ICONS: Record<string, TaskIconComponent> = {
 };
 
 
+// Task types that expose a Stop affordance — kept narrow so we don't
+// invite cancellation on background tasks (chat-naming, summarisation)
+// where it has no meaningful semantics.
+const CANCELLABLE_TYPES: ReadonlySet<ActiveTask['type']> = new Set(['source', 'studio']);
+
 const TaskRow: React.FC<{ task: ActiveTask; onCancel?: (taskId: string) => void }> = ({ task, onCancel }) => {
   const Icon = TASK_ICONS[task.type] || Gear;
+  const isCancellable = !!onCancel && CANCELLABLE_TYPES.has(task.type);
 
   return (
     <div className="group/task flex items-center gap-2.5 px-3 py-2 rounded-lg bg-stone-50 border border-stone-100">
@@ -70,11 +77,12 @@ const TaskRow: React.FC<{ task: ActiveTask; onCancel?: (taskId: string) => void 
         <p className="text-xs font-medium text-stone-800 truncate">{task.label}</p>
         <p className="text-[11px] text-stone-500 truncate">{task.detail}</p>
       </div>
-      {onCancel && task.type === 'source' ? (
+      {isCancellable ? (
         <button
-          onClick={() => onCancel(task.id)}
+          onClick={() => onCancel?.(task.id)}
           className="flex-shrink-0 text-stone-300 group-hover/task:text-red-500 transition-colors"
-          title="Stop processing"
+          title={task.type === 'source' ? 'Stop processing' : 'Cancel generation'}
+          aria-label={task.type === 'source' ? 'Stop processing' : 'Cancel generation'}
         >
           <StopCircle size={16} weight="fill" className="hidden group-hover/task:block" />
           <CircleNotch size={14} className="animate-spin text-amber-600 block group-hover/task:hidden" />
@@ -260,17 +268,39 @@ export const ActiveTasksBar: React.FC<ActiveTasksBarProps> = ({
         >
           <div className="px-2.5 pb-2.5 space-y-1.5 max-h-[350px] overflow-y-auto">
             {/* Active tasks */}
-            {allTasks.map((task) => (
-              <TaskRow
-                key={task.id}
-                task={task}
-                onCancel={task.type === 'source' ? async (sourceId) => {
+            {allTasks.map((task) => {
+              // Type-specific cancel dispatch. Both paths optimistically
+              // remove the task from local state so the spinner stops
+              // immediately — the next 3s poll reconciles with the
+              // backend's filtered active-tasks list.
+              const optimisticDrop = (id: string) =>
+                setTasks((prev) => prev.filter((t) => t.id !== id));
+
+              let handleCancel: ((taskId: string) => void) | undefined;
+              if (task.type === 'source') {
+                handleCancel = async (sourceId) => {
+                  optimisticDrop(sourceId);
                   try {
                     await sourcesAPI.cancelProcessing(projectId, sourceId);
-                  } catch { /* ignore */ }
-                } : undefined}
-              />
-            ))}
+                  } catch { /* ignore — next poll will reconcile */ }
+                };
+              } else if (task.type === 'studio') {
+                handleCancel = async (jobId) => {
+                  optimisticDrop(jobId);
+                  try {
+                    await cancelStudioJob(projectId, jobId);
+                  } catch { /* ignore — next poll will reconcile */ }
+                };
+              }
+
+              return (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  onCancel={handleCancel}
+                />
+              );
+            })}
             {/* Completed chats with "Open" button */}
             {visibleCompletedChats.map((chat) => (
               <CompletedRow

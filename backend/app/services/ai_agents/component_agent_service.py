@@ -128,6 +128,9 @@ class ComponentAgentService:
             status_message="Starting component generation..."
         )
 
+        # Cancellation breakpoint at worker start.
+        studio_index_service.raise_if_cancelled(project_id, job_id)
+
         # Get source content (optional — can generate from direction alone)
         source_content = ""
         if source_id:

@@ -85,6 +85,9 @@ class WireframeAgentService:
             started_at=started_at.isoformat(),
         )
 
+        # Cancellation breakpoint at worker start.
+        studio_index_service.raise_if_cancelled(project_id, job_id)
+
         logger.info("Starting wireframe agent job %s", job_id[:8])
 
         try:

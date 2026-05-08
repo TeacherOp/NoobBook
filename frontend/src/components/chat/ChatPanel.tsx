@@ -273,6 +273,43 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     return true;
   }, [onCostsChange]);
 
+  /**
+   * Refetch a chat's full state when SSE streaming ended without a terminal
+   * event (proxy truncation, network drop, etc.). Backend has already
+   * persisted whatever it produced, so we just need to surface it.
+   *
+   * Chat-id-aware: if the user has switched to a different chat by the
+   * time the refetch returns, the activeChat replacement is skipped so
+   * the recovery doesn't yank them back to the chat they navigated away
+   * from. The source-selection notification fires only when the chat is
+   * still active.
+   */
+  const recoverChatFromServer = useCallback(
+    async (chatId: string, errorToastMessage?: string) => {
+      try {
+        const chat = await chatsAPI.getChat(projectId, chatId);
+        let stillActive = false;
+        setActiveChat((prev) => {
+          if (!prev || prev.id !== chat.id) return prev;
+          stillActive = true;
+          return chat;
+        });
+        if (stillActive) {
+          onActiveChatChange(chat.id, chat.selected_source_ids ?? []);
+        }
+        onCostsChange?.();
+        await loadUserUsage();
+      } catch (recoveryErr) {
+        log.error({ err: recoveryErr, chatId }, 'recovery refetch failed');
+        errorWithLogs(
+          errorToastMessage ||
+            'Connection dropped before the response arrived. Refresh to load it.',
+        );
+      }
+    },
+    [projectId, onActiveChatChange, onCostsChange, loadUserUsage, errorWithLogs],
+  );
+
   const reconcileChatMetadata = useCallback(async (chatId: string) => {
     try {
       const [chat] = await Promise.all([
@@ -563,8 +600,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         // tool-use gap — the backend has already persisted the assistant
         // message via main_chat_service, so a refetch surfaces it without
         // re-running the model. Without this branch the UI stuck on the
-        // Reading Beat until the user manually refreshed (#item-still-not-
-        // working repro from prod logs showed 407s / 523s / 658s streams).
+        // Reading Beat until the user manually refreshed (prod logs
+        // showed 407s / 523s / 658s streams driving the bug).
         log.warn(
           {
             chatId: currentChat.id,
@@ -574,16 +611,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           'stream ended without terminal event — recovering from server',
         );
         setStreamingAssistantContent('');
-        try {
-          await loadFullChat(currentChat.id);
-          onCostsChange?.();
-          await loadUserUsage();
-        } catch (recoveryErr) {
-          log.error({ err: recoveryErr }, 'recovery refetch failed');
-          errorWithLogs(
-            'Connection dropped before the response arrived. Refresh to load it.',
-          );
-        }
+        await recoverChatFromServer(currentChat.id);
       }
     } catch (err) {
       // Don't show error toast if user intentionally stopped
@@ -612,17 +640,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           // recover by re-fetching the chat instead. The backend's
           // exception handler in main_chat_service already persists an
           // error-marked assistant message before the SSE error event,
-          // so the refetch should surface either the partial response
-          // or a recorded failure the user can retry from.
+          // so the refetch surfaces either the partial response or a
+          // recorded failure the user can retry from.
           log.warn({ err }, 'stream errored after partial events — recovering from server');
-          try {
-            await loadFullChat(currentChat.id);
-            onCostsChange?.();
-            await loadUserUsage();
-          } catch (recoveryErr) {
-            log.error({ err: recoveryErr }, 'recovery refetch failed');
-            errorWithLogs('Failed to send message');
-          }
+          await recoverChatFromServer(currentChat.id, 'Failed to send message');
         }
       }
       setStreamingAssistantContent('');

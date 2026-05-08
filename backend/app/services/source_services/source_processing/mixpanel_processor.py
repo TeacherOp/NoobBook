@@ -5,7 +5,7 @@ Educational Note: Lightweight verifier. Confirms the Mixpanel Query API is
 reachable with the configured Service Account, fetches a sample of tracked
 event names for the summary, and marks the source ready. All real queries
 happen live via the chat tools (mixpanel_list_events, mixpanel_query_events,
-mixpanel_segmentation, mixpanel_funnel, mixpanel_retention, mixpanel_jql).
+mixpanel_segmentation, mixpanel_funnel, mixpanel_retention, mixpanel_events_after).
 """
 
 from __future__ import annotations
@@ -55,7 +55,8 @@ def _build_processed_text(
     lines.append(
         "Tip: Use mixpanel_list_events, mixpanel_query_events, mixpanel_segmentation, "
         "mixpanel_list_funnels, mixpanel_query_funnel, mixpanel_retention, and "
-        "mixpanel_jql tools in chat for live analytics queries."
+        "mixpanel_events_after (cohort path analysis: 'what do users do after X') "
+        "tools in chat for live analytics queries."
     )
     lines.append("")
 

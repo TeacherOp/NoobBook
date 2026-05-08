@@ -109,7 +109,7 @@ class ContextLoader:
             "- For DATABASE sources, use analyze_database_agent when the user asks questions that require LIVE data from the database (counts, metrics, lists, trends).",
             "- For FRESHDESK sources, use analyze_freshdesk_agent when the user asks questions about support ticket data (trends, metrics, SLA, agent performance, etc.).",
             "- For JIRA sources, use jira_list_projects, jira_search_issues, jira_get_issue, jira_get_project for live Jira queries.",
-            "- For MIXPANEL sources, use mixpanel_list_events, mixpanel_query_events, mixpanel_segmentation, mixpanel_list_funnels, mixpanel_query_funnel, mixpanel_retention, mixpanel_jql for live analytics queries.",
+            "- For MIXPANEL sources, use mixpanel_list_events, mixpanel_query_events, mixpanel_segmentation, mixpanel_list_funnels, mixpanel_query_funnel, mixpanel_retention, mixpanel_events_after (cohort path analysis: 'what do users do after X') for live analytics queries.",
             "",
         ]
 
@@ -144,7 +144,7 @@ class ContextLoader:
             if file_ext == ".jira":
                 lines.append("  - Chat tools: jira_list_projects, jira_search_issues, jira_get_issue, jira_get_project (live API)")
             if file_ext == ".mixpanel":
-                lines.append("  - Chat tools: mixpanel_list_events, mixpanel_query_events, mixpanel_segmentation, mixpanel_list_funnels, mixpanel_query_funnel, mixpanel_retention, mixpanel_jql (live Query API)")
+                lines.append("  - Chat tools: mixpanel_list_events, mixpanel_query_events, mixpanel_segmentation, mixpanel_list_funnels, mixpanel_query_funnel, mixpanel_retention, mixpanel_events_after — use mixpanel_events_after for 'what do users do after X' / cohort path analysis questions (live Query API)")
             if file_ext == ".mcp":
                 lines.append("  - Chat tool: search_sources (RAG search over MCP resources)")
             if summary_text:

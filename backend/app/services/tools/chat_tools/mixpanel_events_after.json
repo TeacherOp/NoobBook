@@ -1,0 +1,37 @@
+{
+  "name": "mixpanel_events_after",
+  "description": "Cohort path analysis: find the most common events users fire AFTER a given trigger event. Answers questions like 'what do users do after UPI addition' or 'top next steps after signup'. Returns a ranked list with event name, distinct user count, and percentage of cohort. Works on every Mixpanel project (uses /export, no JQL dependency).",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "trigger_event": {
+        "type": "string",
+        "description": "The cohort-defining event, e.g. 'UPI Addition' or 'Signup Complete'. Must match a Mixpanel event name exactly — use mixpanel_list_events first if unsure."
+      },
+      "from_date": {
+        "type": "string",
+        "description": "Cohort window start (YYYY-MM-DD). Users who fired the trigger_event in this window become the cohort."
+      },
+      "to_date": {
+        "type": "string",
+        "description": "Cohort window end (YYYY-MM-DD)."
+      },
+      "window_hours": {
+        "type": "integer",
+        "description": "How far after the trigger to look for subsequent events. Default 168 (7 days).",
+        "default": 168
+      },
+      "top_n": {
+        "type": "integer",
+        "description": "Maximum number of events to return in the ranked list. Default 20.",
+        "default": 20
+      },
+      "exclude_trigger": {
+        "type": "boolean",
+        "description": "If true (default), exclude the trigger_event itself from the returned ranking — the user just did it.",
+        "default": true
+      }
+    },
+    "required": ["trigger_event", "from_date", "to_date"]
+  }
+}

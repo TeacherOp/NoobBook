@@ -310,19 +310,234 @@ class MixpanelService:
 
         return self._make_request("retention", params=params)
 
-    def jql(self, script: str) -> Dict[str, Any]:
+    # --- Cohort path analysis (uses /export, separate host) ---
+
+    # Mixpanel /export host is distinct from /api/query/* — see
+    # https://developer.mixpanel.com/reference/raw-event-export. Region maps to
+    # the `data{,-eu,-in}.mixpanel.com` host family.
+    EXPORT_HOSTS = {
+        "us": "https://data.mixpanel.com",
+        "eu": "https://data-eu.mixpanel.com",
+        "in": "https://data-in.mixpanel.com",
+    }
+
+    # Defensive memory cap. A 14-day export can yield ~10MB-100MB of NDJSON
+    # for typical projects; the cohort dict and counts dict are bounded by
+    # distinct user count, not raw event count. 500k cohort users is way
+    # past the typical product analyst question — past this, Claude should
+    # narrow the date window instead.
+    _EVENTS_AFTER_MAX_COHORT = 500_000
+
+    def _export_request(
+        self,
+        from_date: str,
+        to_date: str,
+    ):
         """
-        Run a JQL script.
+        Stream Mixpanel raw events for [from_date, to_date] inclusive.
 
-        Endpoint: POST /jql  (form-encoded with `script`)
+        Yields parsed event dicts one at a time so callers can process in
+        constant memory regardless of payload size.
 
-        Educational Note: JQL is feature-complete but deprecated in Mixpanel's
-        docs. Still the most expressive query tool — kept as an escape hatch.
+        Raises a generator-friendly RuntimeError mapped to a clean error
+        message at the call site (events_after) when Mixpanel returns
+        non-200.
         """
-        if not script or not script.strip():
-            return {"success": False, "error": "script is required (JavaScript JQL code)."}
+        self._load_config()
+        if not self._configured:
+            raise RuntimeError(
+                "Mixpanel not configured. Please add MIXPANEL_SERVICE_ACCOUNT_USERNAME, "
+                "MIXPANEL_SERVICE_ACCOUNT_SECRET, and MIXPANEL_PROJECT_ID to your .env."
+            )
 
-        return self._make_request("jql", params={"script": script}, method="POST")
+        region = (os.getenv("MIXPANEL_REGION", "us").strip().lower() or "us")
+        host = self.EXPORT_HOSTS.get(region, self.EXPORT_HOSTS["us"])
+        url = f"{host}/api/2.0/export"
+        params = {
+            "project_id": self._project_id,
+            "from_date": from_date,
+            "to_date": to_date,
+        }
+
+        # stream=True + iter_lines avoids loading the full NDJSON body into
+        # memory; for high-volume projects the payload can be 100MB+.
+        try:
+            with requests.get(
+                url, auth=self._auth, params=params, stream=True, timeout=120
+            ) as response:
+                if response.status_code == 401:
+                    raise RuntimeError("Authentication failed. Check service account username/secret.")
+                if response.status_code == 402:
+                    raise RuntimeError("Mixpanel rejected the request (payment/quota).")
+                if response.status_code == 403:
+                    raise RuntimeError("Permission denied. Service account must have access to the project.")
+                if response.status_code == 429:
+                    raise RuntimeError("Mixpanel rate limit hit (60/hr on /export). Try again later.")
+                if response.status_code != 200:
+                    raise RuntimeError(
+                        f"Mixpanel /export error: {response.status_code} - {response.text[:200]}"
+                    )
+
+                for line in response.iter_lines(decode_unicode=True):
+                    if not line:
+                        continue
+                    try:
+                        yield json.loads(line)
+                    except ValueError:
+                        # Skip malformed lines rather than failing the whole
+                        # cohort analysis — Mixpanel occasionally emits a
+                        # blank or partial line at the boundary of segments.
+                        continue
+        except requests.exceptions.Timeout:
+            raise RuntimeError("Mixpanel /export request timed out (export may be too large; narrow the date range).")
+        except requests.exceptions.ConnectionError:
+            raise RuntimeError("Could not connect to Mixpanel /export.")
+
+    def events_after(
+        self,
+        trigger_event: str,
+        from_date: str,
+        to_date: str,
+        window_hours: int = 168,
+        top_n: int = 20,
+        exclude_trigger: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Cohort path analysis without JQL.
+
+        Two-pass over Mixpanel /export to keep memory bounded by
+        cohort_size + distinct event_names (NOT by total event volume,
+        which can be millions for busy projects):
+
+          Pass 1: stream the cohort-window slice; collect every user who
+                  fired `trigger_event`, recording each user's *earliest*
+                  trigger timestamp.
+          Pass 2: stream the post-trigger slice (cohort_end + ceil(
+                  window_hours/24) days); for events from cohort users
+                  in their per-user forward window, increment a
+                  {event_name: set(distinct_id)} counts dict.
+
+        Two API calls (vs. one) is the right trade — Mixpanel's /export
+        rate limit is 60/hr and chat is interactive, so the doubling is
+        invisible in practice and avoids materialising the full event
+        stream in memory.
+
+        Returns the standard {"success": bool, ...} envelope used by the
+        rest of this service.
+        """
+        from datetime import date, timedelta
+        from collections import defaultdict
+        from math import ceil
+
+        if not trigger_event:
+            return {"success": False, "error": "trigger_event is required."}
+        if not from_date or not to_date:
+            return {"success": False, "error": "from_date and to_date are required (YYYY-MM-DD)."}
+        if window_hours <= 0:
+            return {"success": False, "error": "window_hours must be positive."}
+
+        try:
+            # Validate both ends — fail fast instead of letting Mixpanel
+            # surface a vague 400 from /export.
+            date.fromisoformat(from_date)
+            cohort_end = date.fromisoformat(to_date)
+            buffer_days = ceil(window_hours / 24)
+            export_end = (cohort_end + timedelta(days=buffer_days)).isoformat()
+        except ValueError as exc:
+            return {"success": False, "error": f"Invalid date: {exc}"}
+
+        window_seconds = window_hours * 3600
+
+        # ── Pass 1: build the cohort ────────────────────────────────
+        # Stream only the cohort window — earlier/later trigger fires
+        # don't belong to this cohort. Memory is bounded by cohort_size.
+        cohort: Dict[str, int] = {}  # distinct_id -> earliest trigger ts (s)
+        try:
+            for evt in self._export_request(from_date=from_date, to_date=to_date):
+                if evt.get("event") != trigger_event:
+                    continue
+                props = evt.get("properties") or {}
+                uid = props.get("distinct_id") or props.get("$distinct_id")
+                ts = props.get("time")
+                if not (uid and isinstance(ts, (int, float))):
+                    continue
+                ts_int = int(ts)
+                # Earliest trigger wins so the forward window starts at
+                # the user's first qualifying action.
+                if uid not in cohort or ts_int < cohort[uid]:
+                    cohort[uid] = ts_int
+                if len(cohort) > self._EVENTS_AFTER_MAX_COHORT:
+                    return {
+                        "success": False,
+                        "error": (
+                            f"Cohort exceeds {self._EVENTS_AFTER_MAX_COHORT:,} users — "
+                            "narrow from_date/to_date or use a more specific trigger_event."
+                        ),
+                    }
+        except RuntimeError as exc:
+            return {"success": False, "error": str(exc)}
+
+        if not cohort:
+            return {
+                "success": True,
+                "data": {
+                    "trigger_event": trigger_event,
+                    "from_date": from_date,
+                    "to_date": to_date,
+                    "window_hours": window_hours,
+                    "cohort_size": 0,
+                    "top_events": [],
+                },
+            }
+
+        # ── Pass 2: count post-trigger events per cohort user ──────
+        # Stream the full export window (cohort_window + forward buffer)
+        # and aggregate inline. Memory is bounded by distinct event_name
+        # × distinct cohort users (typically < a few MB).
+        counts: Dict[str, set] = defaultdict(set)
+        try:
+            for evt in self._export_request(from_date=from_date, to_date=export_end):
+                ev_name = evt.get("event")
+                if not ev_name:
+                    continue
+                if exclude_trigger and ev_name == trigger_event:
+                    continue
+                props = evt.get("properties") or {}
+                uid = props.get("distinct_id") or props.get("$distinct_id")
+                ts = props.get("time")
+                if not (uid and isinstance(ts, (int, float))):
+                    continue
+                trigger_ts = cohort.get(uid)
+                if trigger_ts is None:
+                    continue
+                delta = ts - trigger_ts
+                if 0 < delta <= window_seconds:
+                    counts[ev_name].add(uid)
+        except RuntimeError as exc:
+            return {"success": False, "error": str(exc)}
+
+        cohort_size = len(cohort)
+        ranked = sorted(counts.items(), key=lambda kv: -len(kv[1]))[:top_n]
+        top_events = [
+            {
+                "event": name,
+                "users": len(uids),
+                "pct_of_cohort": round(100 * len(uids) / cohort_size, 1),
+            }
+            for name, uids in ranked
+        ]
+
+        return {
+            "success": True,
+            "data": {
+                "trigger_event": trigger_event,
+                "from_date": from_date,
+                "to_date": to_date,
+                "window_hours": window_hours,
+                "cohort_size": cohort_size,
+                "top_events": top_events,
+            },
+        }
 
 
 # Singleton instance

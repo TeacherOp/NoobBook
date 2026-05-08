@@ -41,7 +41,7 @@ class KnowledgeBaseService:
         "mixpanel_list_funnels",
         "mixpanel_query_funnel",
         "mixpanel_retention",
-        "mixpanel_jql",
+        "mixpanel_events_after",
     ]
     NOTION_TOOLS = ["notion_search", "notion_read_page", "notion_get_database_schema", "notion_query_database"]
     GITHUB_TOOLS = []  # Future: ["github_search_prs", "github_get_issue", ...]
@@ -66,7 +66,7 @@ class KnowledgeBaseService:
             "mixpanel_list_funnels": self._execute_mixpanel_list_funnels,
             "mixpanel_query_funnel": self._execute_mixpanel_query_funnel,
             "mixpanel_retention": self._execute_mixpanel_retention,
-            "mixpanel_jql": self._execute_mixpanel_jql,
+            "mixpanel_events_after": self._execute_mixpanel_events_after,
             # Notion tools
             "notion_search": self._execute_notion_search,
             "notion_read_page": self._execute_notion_read_page,
@@ -460,13 +460,56 @@ class KnowledgeBaseService:
             title=f"Retention: {born_event} → {event or '(any)'} ({retention_type}, {unit})",
         )
 
-    def _execute_mixpanel_jql(self, tool_input: Dict[str, Any]) -> str:
-        """Run a JQL script."""
-        script = tool_input.get("script")
-        result = mixpanel_service.jql(script=script)
+    def _execute_mixpanel_events_after(self, tool_input: Dict[str, Any]) -> str:
+        """Cohort path analysis — top events users fire after a trigger event."""
+        trigger_event = tool_input.get("trigger_event")
+        if not trigger_event:
+            return "Error: trigger_event is required."
+        from_date, to_date = self._default_date_window(tool_input)
+        window_hours = tool_input.get("window_hours", 168)
+        top_n = tool_input.get("top_n", 20)
+        exclude_trigger = tool_input.get("exclude_trigger", True)
+
+        result = mixpanel_service.events_after(
+            trigger_event=trigger_event,
+            from_date=from_date,
+            to_date=to_date,
+            window_hours=window_hours,
+            top_n=top_n,
+            exclude_trigger=exclude_trigger,
+        )
         if not result["success"]:
             return f"Error: {result.get('error', 'Unknown error')}"
-        return self._format_mixpanel_data(result.get("data"), title="JQL result")
+
+        # Render as a markdown ranked list — Claude reads markdown lists more
+        # cleanly than nested JSON for "top N" questions, and this output is
+        # what the user ultimately sees. Mirrors the list-funnel formatter.
+        data = result["data"]
+        cohort_size = data["cohort_size"]
+        top_events = data["top_events"]
+        days = round(window_hours / 24, 1)
+
+        if cohort_size == 0:
+            return (
+                f"No users fired \"{trigger_event}\" between {from_date} and {to_date}. "
+                "Try widening the date range or check the event name spelling."
+            )
+
+        lines = [
+            f"Cohort: {cohort_size:,} users fired \"{trigger_event}\" between "
+            f"{from_date} and {to_date}",
+            f"Top events fired in the next {days} day(s):",
+            "",
+        ]
+        if not top_events:
+            lines.append("(cohort users fired no other events in the window)")
+        else:
+            for i, row in enumerate(top_events, 1):
+                lines.append(
+                    f"{i}. **{row['event']}** — "
+                    f"{row['users']:,} users ({row['pct_of_cohort']}%)"
+                )
+        return "\n".join(lines)
 
     @staticmethod
     def _format_mixpanel_data(data: Any, title: str) -> str:

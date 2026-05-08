@@ -544,14 +544,16 @@ const ShareRow: React.FC<ShareRowProps> = ({ share, copied, onCopy, onRevoke, st
   // users can manually copy (Cmd/Ctrl-C) when the Clipboard API path fails.
   // The handler also auto-selects after a failed Copy click.
   const urlInputRef = useRef<HTMLInputElement | null>(null);
-  const selectUrl = () => {
+  // Memoised so the input doesn't see a fresh handler on every parent
+  // re-render. The ref is stable, so the callback has no dependencies.
+  const selectUrl = useCallback(() => {
     const el = urlInputRef.current;
     if (!el) return;
     el.focus();
     // setSelectionRange is the cross-platform-safe variant; .select() flakes
     // on some mobile browsers when the input has just received focus.
     el.setSelectionRange(0, el.value.length);
-  };
+  }, []);
 
   return (
     <div
@@ -597,8 +599,16 @@ const ShareRow: React.FC<ShareRowProps> = ({ share, copied, onCopy, onRevoke, st
               onClick={selectUrl}
               onFocus={selectUrl}
               title={share.url}
-              aria-label="Share link URL"
-              className="flex-1 min-w-0 truncate font-mono text-[11px] text-muted-foreground bg-transparent border-0 outline-none p-0 m-0 h-auto leading-normal focus-visible:ring-0 focus-visible:ring-offset-0 focus:text-foreground cursor-text"
+              // Unique per row so screen readers can distinguish multiple
+              // share inputs in the list — generic "Share link URL" alone
+              // produced identical accessible names for every row.
+              aria-label={`Share link URL: ${share.url}`}
+              // overflow-x-auto (NOT `truncate`) so the input scrolls
+              // horizontally for long URLs. `truncate` adds overflow:hidden
+              // which silently clips the text inside the input — selection
+              // still copies the full value, but a user clicking just to
+              // visually inspect the URL would only ever see the prefix.
+              className="flex-1 min-w-0 overflow-x-auto font-mono text-[11px] text-muted-foreground bg-transparent border-0 outline-none p-0 m-0 h-auto leading-normal focus-visible:ring-0 focus-visible:ring-offset-0 focus:text-foreground cursor-text"
             />
             {inactive && (
               <span className="flex-shrink-0 px-1.5 py-px rounded text-[10px] font-medium uppercase tracking-wide bg-stone-200/70 text-stone-700 dark:bg-stone-800/70 dark:text-stone-300">

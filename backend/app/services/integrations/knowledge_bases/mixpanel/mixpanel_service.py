@@ -11,6 +11,9 @@ Lazy singleton pattern mirroring jira_service.
 import json
 import logging
 import os
+from collections import defaultdict
+from datetime import date, timedelta
+from math import ceil
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -322,10 +325,14 @@ class MixpanelService:
     }
 
     # Defensive memory cap. A 14-day export can yield ~10MB-100MB of NDJSON
-    # for typical projects; the cohort dict and counts dict are bounded by
-    # distinct user count, not raw event count. 500k cohort users is way
-    # past the typical product analyst question — past this, Claude should
-    # narrow the date window instead.
+    # for typical projects.
+    #
+    # Memory shape: cohort is O(N) in users; counts is dict[event_name,
+    # set[distinct_id]] which is O(N × E) in the worst case (every cohort
+    # user fires every event type). For a typical product (cohort size
+    # 1k-50k, event types 50-500) that's well under 100MB. The 500k-cohort
+    # cap is the safety rail for accidental "no filter" runs — Claude
+    # should narrow the date window or trigger_event past this point.
     _EVENTS_AFTER_MAX_COHORT = 500_000
 
     def _export_request(
@@ -425,16 +432,16 @@ class MixpanelService:
         Returns the standard {"success": bool, ...} envelope used by the
         rest of this service.
         """
-        from datetime import date, timedelta
-        from collections import defaultdict
-        from math import ceil
-
         if not trigger_event:
             return {"success": False, "error": "trigger_event is required."}
         if not from_date or not to_date:
             return {"success": False, "error": "from_date and to_date are required (YYYY-MM-DD)."}
         if window_hours <= 0:
             return {"success": False, "error": "window_hours must be positive."}
+        # Guard against `top_n=0` silently producing an empty list — that
+        # masks a successful run as "no events found" and confuses the caller.
+        if top_n <= 0:
+            return {"success": False, "error": "top_n must be positive."}
 
         try:
             # Validate both ends — fail fast instead of letting Mixpanel
@@ -466,11 +473,11 @@ class MixpanelService:
                 # the user's first qualifying action.
                 if uid not in cohort or ts_int < cohort[uid]:
                     cohort[uid] = ts_int
-                if len(cohort) > self._EVENTS_AFTER_MAX_COHORT:
+                if len(cohort) >= self._EVENTS_AFTER_MAX_COHORT:
                     return {
                         "success": False,
                         "error": (
-                            f"Cohort exceeds {self._EVENTS_AFTER_MAX_COHORT:,} users — "
+                            f"Cohort reached the {self._EVENTS_AFTER_MAX_COHORT:,}-user cap — "
                             "narrow from_date/to_date or use a more specific trigger_event."
                         ),
                     }

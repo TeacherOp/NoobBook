@@ -277,3 +277,15 @@ class TestEventsAfterValidation:
             window_hours=0,
         )
         assert result["success"] is False
+
+    def test_zero_top_n_errors(self, configured_service):
+        """top_n=0 must error rather than silently returning an empty list —
+        otherwise a successful run looks like 'no events found'."""
+        result = configured_service.events_after(
+            trigger_event="X",
+            from_date="2024-01-01",
+            to_date="2024-01-07",
+            top_n=0,
+        )
+        assert result["success"] is False
+        assert "top_n" in result["error"]

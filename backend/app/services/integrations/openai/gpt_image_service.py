@@ -65,12 +65,18 @@ _SIZE_TABLE = {
 # Errors that signal "GPT Image 2 won't work on this key right now" — for
 # these the caller should transparently fall back to Gemini. See OpenAI's
 # org-verification doc: gpt-image-2 requires verification before use.
+# Also includes account-level billing/quota errors: these are not prompt-
+# or model-specific, so retrying on the same OpenAI key won't help, but
+# Gemini (different account) is unaffected.
 _FALLBACK_ERROR_CODES = {
     "model_not_found",
     "unauthorized_organization",
     "image_generation_user_not_allowed",
     "must_be_verified_to_use_model",
     "organization_must_be_verified",
+    "billing_hard_limit_reached",
+    "insufficient_quota",
+    "account_deactivated",
 }
 
 

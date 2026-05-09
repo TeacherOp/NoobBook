@@ -60,7 +60,7 @@ export const AdSection: React.FC = () => {
         <AdListItem
           key={job.id}
           job={job}
-          index={savedAdJobs.length - i}
+          iterationIndex={savedAdJobs.length - i}
           onClick={() => setViewingAdJob(job)}
           onDelete={() => handleAdDelete(job.id)}
         />

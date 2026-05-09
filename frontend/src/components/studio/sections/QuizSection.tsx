@@ -51,10 +51,11 @@ export const QuizSection: React.FC = () => {
         <QuizProgressIndicator currentQuizJob={currentQuizJob} projectId={projectId} />
       )}
 
-      {filteredJobs.map((job) => (
+      {filteredJobs.map((job, i) => (
         <QuizListItem
           key={job.id}
           job={job}
+          iterationIndex={filteredJobs.length - i}
           onClick={() => setViewingQuizJob(job)}
           onDelete={() => handleQuizDelete(job.id)}
         />

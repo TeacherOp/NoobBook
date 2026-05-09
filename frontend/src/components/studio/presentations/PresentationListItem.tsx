@@ -1,42 +1,53 @@
-/**
- * PresentationListItem Component
- * Educational Note: Renders a saved presentation in the Generated Content list.
- * Clicking opens presentation in viewer modal. Download button downloads PPTX.
- */
-
 import React from 'react';
 import { PresentationChart, DownloadSimple, Trash } from '@phosphor-icons/react';
 import type { PresentationJob } from '@/lib/api/studio';
+import { IterationRowHeader } from '../shared/IterationRowHeader';
+import { truncateForTitle } from '@/lib/strings';
 
 interface PresentationListItemProps {
   job: PresentationJob;
+  iterationIndex: number;
   onOpen: () => void;
   onDownload: (e: React.MouseEvent) => void;
   onDelete: () => void;
 }
 
+const resolveTitle = (job: PresentationJob): { title: string; direction: string | null } => {
+  const direction = truncateForTitle(job.direction);
+  const presTitle = truncateForTitle(job.presentation_title);
+  if (presTitle) return { title: presTitle, direction };
+  if (direction) return { title: direction, direction: null };
+  if (job.source_name?.trim()) return { title: job.source_name, direction };
+  return { title: 'Presentation', direction };
+};
+
 export const PresentationListItem: React.FC<PresentationListItemProps> = ({
   job,
+  iterationIndex,
   onOpen,
   onDownload,
   onDelete,
 }) => {
+  const { title, direction } = resolveTitle(job);
+  const slideCount = job.total_slides || job.slides_created || 0;
   return (
     <div
       onClick={onOpen}
       className="group flex items-start gap-2.5 p-2.5 bg-muted/50 rounded-lg border hover:border-primary/50 cursor-pointer transition-colors"
     >
       <PresentationChart size={16} weight="duotone" className="text-amber-600 mt-0.5 flex-shrink-0" />
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium text-gray-900 truncate">
-          {job.presentation_title || 'Presentation'}
-        </p>
-        <p className="text-[11px] text-gray-500 truncate">
-          {job.total_slides || job.slides_created || 0} slides
-          {job.presentation_type && ` • ${job.presentation_type}`}
-        </p>
-      </div>
-      {/* Download PPTX button */}
+      <IterationRowHeader
+        title={title}
+        direction={direction}
+        sourceName={job.source_name ?? null}
+        createdAt={job.created_at}
+        iterationIndex={iterationIndex}
+      />
+      {slideCount > 0 && (
+        <span className="text-[11px] text-muted-foreground flex-shrink-0 mt-1">
+          {slideCount} sl
+        </span>
+      )}
       <button
         onClick={onDownload}
         className="p-1.5 hover:bg-amber-600/20 rounded transition-colors"

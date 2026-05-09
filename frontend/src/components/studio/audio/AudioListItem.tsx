@@ -10,9 +10,12 @@ import { SpeakerHigh, Play, Pause, DownloadSimple, PencilSimple, Trash } from '@
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import type { AudioJob } from '@/lib/api/studio';
+import { IterationRowHeader } from '../shared/IterationRowHeader';
+import { truncateForTitle } from '@/lib/strings';
 
 interface AudioListItemProps {
   job: AudioJob;
+  iterationIndex: number;
   playingJobId: string | null;
   isPaused: boolean;
   currentTime: number;
@@ -35,8 +38,16 @@ interface AudioListItemProps {
   onToggleEdit?: () => void;
 }
 
+const resolveTitle = (job: AudioJob): { title: string; direction: string | null } => {
+  const direction = truncateForTitle(job.direction);
+  if (direction) return { title: direction, direction: null };
+  if (job.source_name?.trim()) return { title: job.source_name, direction };
+  return { title: 'Audio overview', direction };
+};
+
 export const AudioListItem: React.FC<AudioListItemProps> = ({
   job,
+  iterationIndex,
   playingJobId,
   isPaused,
   currentTime,
@@ -94,17 +105,19 @@ export const AudioListItem: React.FC<AudioListItemProps> = ({
             <SpeakerHigh size={16} className="text-primary" />
           )}
         </div>
-        <div className="flex-1 min-w-0 overflow-hidden">
-          <div className="flex items-center gap-1.5">
-            <p className="text-xs font-medium truncate">{job.source_name}</p>
-            {job.parent_job_id && (
-              <span className="inline-flex items-center gap-0.5 text-[10px] text-primary bg-primary/10 px-1 py-0.5 rounded flex-shrink-0">
-                <PencilSimple size={8} />
-                edited
-              </span>
-            )}
-          </div>
-        </div>
+        {(() => {
+          const { title, direction } = resolveTitle(job);
+          return (
+            <IterationRowHeader
+              title={title}
+              direction={direction}
+              sourceName={job.source_name ?? null}
+              createdAt={job.created_at}
+              iterationIndex={iterationIndex}
+              isEdited={!!job.parent_job_id}
+            />
+          );
+        })()}
         <div className="flex items-center gap-1 flex-shrink-0">
           <Button
             size="sm"

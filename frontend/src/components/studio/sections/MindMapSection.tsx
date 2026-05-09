@@ -50,10 +50,11 @@ export const MindMapSection: React.FC = () => {
         <MindMapProgressIndicator currentMindMapJob={currentMindMapJob} projectId={projectId} />
       )}
 
-      {filteredJobs.map((job) => (
+      {filteredJobs.map((job, i) => (
         <MindMapListItem
           key={job.id}
           job={job}
+          iterationIndex={filteredJobs.length - i}
           onClick={() => setViewingMindMapJob(job)}
           onDelete={() => handleMindMapDelete(job.id)}
         />

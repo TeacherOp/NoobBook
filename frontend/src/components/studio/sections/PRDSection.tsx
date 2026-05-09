@@ -50,10 +50,11 @@ export const PRDSection: React.FC = () => {
         <PRDProgressIndicator currentPRDJob={currentPRDJob} projectId={projectId} />
       )}
 
-      {filteredJobs.map((job) => (
+      {filteredJobs.map((job, i) => (
         <PRDListItem
           key={job.id}
           job={job}
+          iterationIndex={filteredJobs.length - i}
           onOpen={() => setViewingPRDJob(job)}
           onDownload={(e) => {
             e.stopPropagation();

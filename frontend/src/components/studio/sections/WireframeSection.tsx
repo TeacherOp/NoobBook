@@ -54,10 +54,11 @@ export const WireframeSection: React.FC = () => {
         <WireframeProgressIndicator currentWireframeJob={currentWireframeJob} projectId={projectId} />
       )}
 
-      {filteredJobs.map((job) => (
+      {filteredJobs.map((job, i) => (
         <WireframeListItem
           key={job.id}
           job={job}
+          iterationIndex={filteredJobs.length - i}
           onClick={() => setViewingWireframeJob(job)}
           onDelete={() => handleWireframeDelete(job.id)}
         />

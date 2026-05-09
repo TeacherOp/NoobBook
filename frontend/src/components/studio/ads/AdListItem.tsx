@@ -1,20 +1,26 @@
-/**
- * AdListItem Component
- * Educational Note: Renders saved ad creatives in the Generated Content list.
- */
-
 import React from 'react';
 import { Image, Trash } from '@phosphor-icons/react';
 import type { AdJob } from '@/lib/api/studio';
+import { IterationRowHeader } from '../shared/IterationRowHeader';
+import { truncateForTitle } from '@/lib/strings';
 
 interface AdListItemProps {
   job: AdJob;
-  index: number;
+  iterationIndex: number;
   onClick: () => void;
   onDelete: () => void;
 }
 
-export const AdListItem: React.FC<AdListItemProps> = ({ job, index, onClick, onDelete }) => {
+const resolveTitle = (job: AdJob): { title: string; direction: string | null } => {
+  const direction = truncateForTitle(job.direction);
+  if (direction) return { title: direction, direction: null };
+  const product = truncateForTitle(job.product_name);
+  if (product) return { title: product, direction };
+  return { title: 'Ad creatives', direction };
+};
+
+export const AdListItem: React.FC<AdListItemProps> = ({ job, iterationIndex, onClick, onDelete }) => {
+  const { title, direction } = resolveTitle(job);
   return (
     <div
       className="group flex items-center gap-2.5 p-2.5 bg-muted/50 rounded-lg border hover:border-primary/50 transition-colors cursor-pointer"
@@ -23,9 +29,13 @@ export const AdListItem: React.FC<AdListItemProps> = ({ job, index, onClick, onD
       <div className="p-1.5 bg-green-500/10 rounded-md flex-shrink-0">
         <Image size={16} className="text-green-600" />
       </div>
-      <div className="flex-1 min-w-0 overflow-hidden">
-        <p className="text-xs font-medium truncate">Ad Creatives · Iteration {index}</p>
-      </div>
+      <IterationRowHeader
+        title={title}
+        direction={direction}
+        sourceName={null}
+        createdAt={job.created_at}
+        iterationIndex={iterationIndex}
+      />
       <span className="text-[11px] text-muted-foreground flex-shrink-0">
         {job.images.length}
       </span>

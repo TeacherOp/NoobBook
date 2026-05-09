@@ -55,10 +55,11 @@ export const PresentationSection: React.FC = () => {
         <PresentationProgressIndicator currentPresentationJob={currentPresentationJob} projectId={projectId} />
       )}
 
-      {filteredJobs.map((job) => (
+      {filteredJobs.map((job, i) => (
         <PresentationListItem
           key={job.id}
           job={job}
+          iterationIndex={filteredJobs.length - i}
           onOpen={() => setViewingPresentationJob(job)}
           onDownload={(e) => {
             e.stopPropagation();

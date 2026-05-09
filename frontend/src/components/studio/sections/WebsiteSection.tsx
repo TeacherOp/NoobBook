@@ -55,10 +55,11 @@ export const WebsiteSection: React.FC = () => {
         <WebsiteProgressIndicator currentWebsiteJob={currentWebsiteJob} projectId={projectId} />
       )}
 
-      {filteredJobs.map((job) => (
+      {filteredJobs.map((job, i) => (
         <WebsiteListItem
           key={job.id}
           job={job}
+          iterationIndex={filteredJobs.length - i}
           onOpen={() => setViewingWebsiteJob(job)}
           onDownload={(e) => {
             e.stopPropagation();

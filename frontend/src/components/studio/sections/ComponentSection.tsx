@@ -49,10 +49,11 @@ export const ComponentSection: React.FC = () => {
         <ComponentProgressIndicator currentComponentJob={currentComponentJob} projectId={projectId} />
       )}
 
-      {filteredJobs.map((job) => (
+      {filteredJobs.map((job, i) => (
         <ComponentListItem
           key={job.id}
           job={job}
+          iterationIndex={filteredJobs.length - i}
           onClick={() => setViewingComponentJob(job)}
           onDelete={() => handleComponentDelete(job.id)}
         />

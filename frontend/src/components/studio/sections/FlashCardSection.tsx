@@ -50,10 +50,11 @@ export const FlashCardSection: React.FC = () => {
         <FlashCardProgressIndicator currentFlashCardJob={currentFlashCardJob} projectId={projectId} />
       )}
 
-      {filteredJobs.map((job) => (
+      {filteredJobs.map((job, i) => (
         <FlashCardListItem
           key={job.id}
           job={job}
+          iterationIndex={filteredJobs.length - i}
           onClick={() => setViewingFlashCardJob(job)}
           onDelete={() => handleFlashCardDelete(job.id)}
         />

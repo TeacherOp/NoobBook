@@ -1,28 +1,33 @@
-/**
- * BlogListItem Component
- * Educational Note: Renders saved blog posts in the Generated Content list.
- * Shows title and word count. Uses indigo/blue theme.
- */
-
 import React from 'react';
-import { Article, DownloadSimple, PencilSimple, Trash } from '@phosphor-icons/react';
+import { Article, DownloadSimple, Trash } from '@phosphor-icons/react';
 import type { BlogJob } from '@/lib/api/studio';
+import { IterationRowHeader } from '../shared/IterationRowHeader';
+import { truncateForTitle } from '@/lib/strings';
 
 interface BlogListItemProps {
   job: BlogJob;
+  iterationIndex: number;
   onOpen: () => void;
   onDownload: (e: React.MouseEvent) => void;
   onDelete: () => void;
 }
 
-export const BlogListItem: React.FC<BlogListItemProps> = ({ job, onOpen, onDownload, onDelete }) => {
-  // Format word count for display
+const resolveTitle = (job: BlogJob): { title: string; direction: string | null } => {
+  const direction = truncateForTitle(job.direction);
+  const title = truncateForTitle(job.title);
+  if (title) return { title, direction };
+  if (direction) return { title: direction, direction: null };
+  if (job.source_name?.trim()) return { title: job.source_name, direction };
+  return { title: 'Blog post', direction };
+};
+
+export const BlogListItem: React.FC<BlogListItemProps> = ({ job, iterationIndex, onOpen, onDownload, onDelete }) => {
+  const { title, direction } = resolveTitle(job);
   const wordCountDisplay = job.word_count
     ? job.word_count >= 1000
       ? `${(job.word_count / 1000).toFixed(1)}k`
       : `${job.word_count}`
     : '-';
-
   return (
     <div
       className="group flex items-center gap-2.5 p-2.5 bg-muted/50 rounded-lg border hover:border-primary/50 transition-colors cursor-pointer"
@@ -31,17 +36,14 @@ export const BlogListItem: React.FC<BlogListItemProps> = ({ job, onOpen, onDownl
       <div className="p-1.5 bg-indigo-500/10 rounded-md flex-shrink-0">
         <Article size={16} className="text-indigo-600" />
       </div>
-      <div className="flex-1 min-w-0 overflow-hidden">
-        <p className="text-xs font-medium truncate flex items-center gap-1.5">
-          {job.title || job.source_name}
-          {job.parent_job_id && (
-            <span className="inline-flex items-center gap-0.5 text-[10px] text-indigo-600 bg-indigo-500/10 px-1 py-0.5 rounded flex-shrink-0">
-              <PencilSimple size={9} />
-              Edited
-            </span>
-          )}
-        </p>
-      </div>
+      <IterationRowHeader
+        title={title}
+        direction={direction}
+        sourceName={job.source_name ?? null}
+        createdAt={job.created_at}
+        iterationIndex={iterationIndex}
+        isEdited={!!job.parent_job_id}
+      />
       <span className="text-[11px] text-muted-foreground flex-shrink-0">
         {wordCountDisplay}w
       </span>

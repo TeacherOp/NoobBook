@@ -54,10 +54,11 @@ export const FlowDiagramSection: React.FC = () => {
         <FlowDiagramProgressIndicator currentFlowDiagramJob={currentFlowDiagramJob} projectId={projectId} />
       )}
 
-      {filteredJobs.map((job) => (
+      {filteredJobs.map((job, i) => (
         <FlowDiagramListItem
           key={job.id}
           job={job}
+          iterationIndex={filteredJobs.length - i}
           onClick={() => setViewingFlowDiagramJob(job)}
           onDelete={() => handleFlowDiagramDelete(job.id)}
         />

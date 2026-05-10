@@ -28,6 +28,12 @@ export const WebsiteListItem: React.FC<WebsiteListItemProps> = ({
   onDelete,
 }) => {
   const { title, direction } = resolveTitle(job);
+  const pageCount = job.pages_created?.length ?? 0;
+  const featureCount = job.features_implemented?.length ?? 0;
+  const scopeParts = [
+    pageCount > 0 ? `${pageCount} pg` : null,
+    featureCount > 0 ? `${featureCount} ft` : null,
+  ].filter(Boolean);
   return (
     <div
       onClick={onOpen}
@@ -41,6 +47,11 @@ export const WebsiteListItem: React.FC<WebsiteListItemProps> = ({
         createdAt={job.created_at}
         iterationIndex={iterationIndex}
       />
+      {scopeParts.length > 0 && (
+        <span className="text-[11px] text-muted-foreground flex-shrink-0 mt-1">
+          {scopeParts.join(' · ')}
+        </span>
+      )}
       <button
         onClick={onDownload}
         className="p-1.5 hover:bg-purple-600/20 rounded transition-colors"

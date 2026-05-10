@@ -75,6 +75,8 @@ export const AudioListItem: React.FC<AudioListItemProps> = ({
   // Edit input visibility is controlled by parent (isEditOpen) OR by active editing state
   const showEditInput = isEditOpen || isEditing;
 
+  const { title, direction } = resolveTitle(job);
+
   const [editInput, setEditInput] = useState(defaultEditInput);
 
   // Sync edit input when defaultEditInput changes (e.g. after failed edit preserves input)
@@ -105,19 +107,14 @@ export const AudioListItem: React.FC<AudioListItemProps> = ({
             <SpeakerHigh size={16} className="text-primary" />
           )}
         </div>
-        {(() => {
-          const { title, direction } = resolveTitle(job);
-          return (
-            <IterationRowHeader
-              title={title}
-              direction={direction}
-              sourceName={job.source_name ?? null}
-              createdAt={job.created_at}
-              iterationIndex={iterationIndex}
-              isEdited={!!job.parent_job_id}
-            />
-          );
-        })()}
+        <IterationRowHeader
+          title={title}
+          direction={direction}
+          sourceName={job.source_name ?? null}
+          createdAt={job.created_at}
+          iterationIndex={iterationIndex}
+          isEdited={!!job.parent_job_id}
+        />
         <div className="flex items-center gap-1 flex-shrink-0">
           <Button
             size="sm"

@@ -27,6 +27,7 @@ export const VideoListItem: React.FC<VideoListItemProps> = ({
   onDelete,
 }) => {
   const { title, direction } = resolveTitle(job);
+  const videoCount = job.videos?.length ?? 0;
   return (
     <div
       onClick={onOpen}
@@ -42,7 +43,7 @@ export const VideoListItem: React.FC<VideoListItemProps> = ({
         isEdited={!!job.parent_job_id}
       />
       <span className="text-[11px] text-muted-foreground flex-shrink-0 mt-1">
-        {job.aspect_ratio} · {job.duration_seconds}s
+        {videoCount > 0 ? `${videoCount}v · ` : ''}{job.aspect_ratio} · {job.duration_seconds}s
       </span>
       <button
         onClick={onDownload}

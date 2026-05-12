@@ -8,6 +8,10 @@ Pricing (per 1M tokens):
 - Opus:   $5 input, $25 output
 - Sonnet: $3 input, $15 output
 - Haiku:  $1 input, $5 output
+
+Prompt-cache multipliers (Anthropic):
+- cache_creation_input_tokens: 1.25× the input rate (one-time write cost)
+- cache_read_input_tokens:     0.10× the input rate (per cached read)
 """
 import logging
 from typing import Dict, Any, Optional
@@ -22,6 +26,10 @@ PRICING = {
     "sonnet": {"input": 3.0, "output": 15.0},
     "haiku": {"input": 1.0, "output": 5.0},
 }
+
+# Prompt-cache multipliers applied to the per-model input rate.
+CACHE_WRITE_MULTIPLIER = 1.25
+CACHE_READ_MULTIPLIER = 0.10
 
 # Tracked model buckets, in stable order. Used by _get_default_costs and
 # _ensure_cost_structure so the breakdown always shows every model bucket
@@ -53,22 +61,55 @@ def _get_model_key(model_string: str) -> str:
     return "sonnet"
 
 
-def _calculate_cost(model_key: str, input_tokens: int, output_tokens: int) -> float:
+def _calculate_cost(
+    model_key: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
+) -> float:
     """
-    Calculate cost for a single API call.
+    Calculate cost for a single API call, including any prompt-cache usage.
 
     Args:
-        model_key: "sonnet" or "haiku"
-        input_tokens: Number of input tokens
-        output_tokens: Number of output tokens
+        model_key: "opus", "sonnet", or "haiku"
+        input_tokens: Non-cached input tokens (billed at the model's input rate)
+        output_tokens: Output tokens (billed at the model's output rate)
+        cache_creation_tokens: Tokens written to the prompt cache. Billed at
+            1.25× the input rate (one-time, amortized over reads).
+        cache_read_tokens: Tokens served from the prompt cache. Billed at
+            0.1× the input rate.
 
     Returns:
-        Cost in USD
+        Total cost in USD for this single call.
     """
     pricing = PRICING.get(model_key, PRICING["sonnet"])
-    input_cost = (input_tokens / 1_000_000) * pricing["input"]
+    input_rate = pricing["input"]
+    input_cost = (input_tokens / 1_000_000) * input_rate
     output_cost = (output_tokens / 1_000_000) * pricing["output"]
-    return input_cost + output_cost
+    cache_write_cost = (cache_creation_tokens / 1_000_000) * input_rate * CACHE_WRITE_MULTIPLIER
+    cache_read_cost = (cache_read_tokens / 1_000_000) * input_rate * CACHE_READ_MULTIPLIER
+    return input_cost + output_cost + cache_write_cost + cache_read_cost
+
+
+def _calculate_cache_savings(
+    model_key: str,
+    cache_creation_tokens: int,
+    cache_read_tokens: int,
+) -> float:
+    """
+    Compute the net dollar savings produced by prompt caching for this call.
+
+    Compares the actual cache-aware cost against the counterfactual where the
+    same tokens would have been billed at the full input rate. Result can be
+    negative on the first call (only writes, no reads yet) — that's correct;
+    the dashboard should reflect the true net.
+    """
+    pricing = PRICING.get(model_key, PRICING["sonnet"])
+    input_rate = pricing["input"]
+    read_gain = (cache_read_tokens / 1_000_000) * input_rate * (1.0 - CACHE_READ_MULTIPLIER)
+    write_premium = (cache_creation_tokens / 1_000_000) * input_rate * (CACHE_WRITE_MULTIPLIER - 1.0)
+    return read_gain - write_premium
 
 
 def _get_project_service():
@@ -130,7 +171,13 @@ def _save_chat_costs(chat_id: str, costs: Dict[str, Any]) -> bool:
 
 
 def _empty_bucket() -> Dict[str, Any]:
-    return {"input_tokens": 0, "output_tokens": 0, "cost": 0.0}
+    return {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost": 0.0,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 0,
+    }
 
 
 def _get_default_costs() -> Dict[str, Any]:
@@ -142,6 +189,7 @@ def _get_default_costs() -> Dict[str, Any]:
     """
     return {
         "total_cost": 0.0,
+        "cache_savings": 0.0,
         "by_model": {key: _empty_bucket() for key in _MODEL_KEYS},
     }
 
@@ -159,14 +207,21 @@ def _ensure_cost_structure(costs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     # Ensure all required fields exist
     if "total_cost" not in costs:
         costs["total_cost"] = 0.0
+    if "cache_savings" not in costs:
+        costs["cache_savings"] = 0.0
     if "by_model" not in costs:
         costs["by_model"] = {}
     if "images" not in costs:
         costs["images"] = {}
 
     for model in _MODEL_KEYS:
-        if model not in costs["by_model"]:
+        bucket = costs["by_model"].get(model)
+        if bucket is None:
             costs["by_model"][model] = _empty_bucket()
+            continue
+        # Backfill cache fields for projects created before cache tracking.
+        bucket.setdefault("cache_creation_tokens", 0)
+        bucket.setdefault("cache_read_tokens", 0)
 
     return costs
 
@@ -176,6 +231,8 @@ def _apply_usage(
     model: str,
     input_tokens: int,
     output_tokens: int,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
 ) -> Dict[str, Any]:
     """
     Mutate a costs dict in place: add this call's tokens + cost to the
@@ -184,14 +241,25 @@ def _apply_usage(
     Extracted so both project-level and chat-level updates share identical math.
     """
     model_key = _get_model_key(model)
-    call_cost = _calculate_cost(model_key, input_tokens, output_tokens)
+    call_cost = _calculate_cost(
+        model_key,
+        input_tokens,
+        output_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        cache_read_tokens=cache_read_tokens,
+    )
 
     bucket = costs["by_model"][model_key]
     bucket["input_tokens"] += input_tokens
     bucket["output_tokens"] += output_tokens
     bucket["cost"] += call_cost
+    bucket["cache_creation_tokens"] = bucket.get("cache_creation_tokens", 0) + cache_creation_tokens
+    bucket["cache_read_tokens"] = bucket.get("cache_read_tokens", 0) + cache_read_tokens
 
     costs["total_cost"] += call_cost
+    costs["cache_savings"] = costs.get("cache_savings", 0.0) + _calculate_cache_savings(
+        model_key, cache_creation_tokens, cache_read_tokens
+    )
     return costs
 
 
@@ -202,6 +270,8 @@ def add_usage(
     output_tokens: int,
     user_id: Optional[str] = None,
     chat_id: Optional[str] = None,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
 ) -> Optional[Dict[str, Any]]:
     """
     Add API usage to project (and optionally chat) cost tracking.
@@ -215,10 +285,14 @@ def add_usage(
     Args:
         project_id: The project UUID
         model: Full model string (e.g., "claude-sonnet-4-6")
-        input_tokens: Number of input tokens used
+        input_tokens: Number of non-cached input tokens used
         output_tokens: Number of output tokens used
         user_id: Optional owner id (falls back to project lookup)
         chat_id: Optional chat UUID — when set, chat-level costs update too
+        cache_creation_tokens: Anthropic `cache_creation_input_tokens`
+            (billed at 1.25× the input rate).
+        cache_read_tokens: Anthropic `cache_read_input_tokens`
+            (billed at 0.1× the input rate).
 
     Returns:
         Updated project cost tracking data or None if project save failed
@@ -229,7 +303,14 @@ def add_usage(
         if project_costs is None:
             project_costs = _get_default_costs()
         project_costs = _ensure_cost_structure(project_costs)
-        _apply_usage(project_costs, model, input_tokens, output_tokens)
+        _apply_usage(
+            project_costs,
+            model,
+            input_tokens,
+            output_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            cache_read_tokens=cache_read_tokens,
+        )
 
         if not _save_costs(project_id, project_costs, user_id=user_id):
             logger.warning("Failed to save costs for project %s", project_id)
@@ -241,7 +322,14 @@ def add_usage(
             if chat_costs is None:
                 chat_costs = _get_default_costs()
             chat_costs = _ensure_cost_structure(chat_costs)
-            _apply_usage(chat_costs, model, input_tokens, output_tokens)
+            _apply_usage(
+                chat_costs,
+                model,
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens=cache_creation_tokens,
+                cache_read_tokens=cache_read_tokens,
+            )
 
             if not _save_chat_costs(chat_id, chat_costs):
                 logger.warning("Failed to save costs for chat %s", chat_id)
@@ -256,7 +344,13 @@ def add_usage(
                 pass
         if resolved_user_id:
             model_key = _get_model_key(model)
-            call_cost = _calculate_cost(model_key, input_tokens, output_tokens)
+            call_cost = _calculate_cost(
+                model_key,
+                input_tokens,
+                output_tokens,
+                cache_creation_tokens=cache_creation_tokens,
+                cache_read_tokens=cache_read_tokens,
+            )
             record_user_period_spend(resolved_user_id, call_cost)
 
         return project_costs
@@ -412,6 +506,8 @@ def record_user_only_usage(
     model: str,
     input_tokens: int,
     output_tokens: int,
+    cache_creation_tokens: int = 0,
+    cache_read_tokens: int = 0,
 ) -> float:
     """
     Track an API call against a user's period spend without a project.
@@ -426,7 +522,13 @@ def record_user_only_usage(
     if not user_id:
         return 0.0
     model_key = _get_model_key(model)
-    cost = _calculate_cost(model_key, input_tokens, output_tokens)
+    cost = _calculate_cost(
+        model_key,
+        input_tokens,
+        output_tokens,
+        cache_creation_tokens=cache_creation_tokens,
+        cache_read_tokens=cache_read_tokens,
+    )
     if cost > 0:
         record_user_period_spend(user_id, cost)
     return cost

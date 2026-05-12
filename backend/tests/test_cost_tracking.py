@@ -12,6 +12,8 @@ import pytest
 from app.utils.cost_tracking import (
     _get_model_key,
     _calculate_cost,
+    _calculate_cache_savings,
+    _apply_usage,
     _get_default_costs,
     _ensure_cost_structure,
 )
@@ -111,6 +113,11 @@ class TestGetDefaultCosts:
             assert costs["by_model"][model]["input_tokens"] == 0
             assert costs["by_model"][model]["output_tokens"] == 0
             assert costs["by_model"][model]["cost"] == 0.0
+            assert costs["by_model"][model]["cache_creation_tokens"] == 0
+            assert costs["by_model"][model]["cache_read_tokens"] == 0
+
+    def test_cache_savings_present(self):
+        assert _get_default_costs()["cache_savings"] == 0.0
 
 
 # ===========================================================================
@@ -166,3 +173,134 @@ class TestEnsureCostStructure:
         result = _ensure_cost_structure(costs)
         assert "sonnet" in result["by_model"]
         assert "haiku" in result["by_model"]
+
+    def test_backfills_cache_fields_for_legacy_buckets(self):
+        """Projects created before cache tracking get the new fields seeded to 0."""
+        legacy = {
+            "total_cost": 1.0,
+            "by_model": {
+                "sonnet": {"input_tokens": 100, "output_tokens": 50, "cost": 1.0},
+            },
+        }
+        result = _ensure_cost_structure(legacy)
+        assert result["by_model"]["sonnet"]["cache_creation_tokens"] == 0
+        assert result["by_model"]["sonnet"]["cache_read_tokens"] == 0
+        # Legacy values must still be preserved.
+        assert result["by_model"]["sonnet"]["input_tokens"] == 100
+        assert result["cache_savings"] == 0.0
+
+
+# ===========================================================================
+# Cache-aware cost math
+# ===========================================================================
+
+class TestCalculateCostWithCache:
+
+    def test_cache_creation_is_125_percent_of_input(self):
+        """1M creation tokens at sonnet's $3 input rate = $3.75 (1.25×)."""
+        assert _calculate_cost("sonnet", 0, 0, cache_creation_tokens=1_000_000) == pytest.approx(3.75)
+
+    def test_cache_read_is_10_percent_of_input(self):
+        """1M read tokens at sonnet's $3 input rate = $0.30 (0.1×)."""
+        assert _calculate_cost("sonnet", 0, 0, cache_read_tokens=1_000_000) == pytest.approx(0.30)
+
+    def test_full_call_with_cache(self):
+        """Regular input + output + creation + read all sum together."""
+        # sonnet: input=$3, output=$15
+        # 100k input ($0.30) + 200k output ($3) + 50k creation ($0.1875) + 500k read ($0.15)
+        cost = _calculate_cost(
+            "sonnet",
+            input_tokens=100_000,
+            output_tokens=200_000,
+            cache_creation_tokens=50_000,
+            cache_read_tokens=500_000,
+        )
+        assert cost == pytest.approx(0.30 + 3.0 + 0.1875 + 0.15)
+
+    def test_haiku_cache_pricing(self):
+        """Haiku input rate is $1/1M → creation = $1.25, read = $0.10."""
+        assert _calculate_cost("haiku", 0, 0, cache_creation_tokens=1_000_000) == pytest.approx(1.25)
+        assert _calculate_cost("haiku", 0, 0, cache_read_tokens=1_000_000) == pytest.approx(0.10)
+
+    def test_legacy_call_without_cache_args_unchanged(self):
+        """Existing callers that pass only input/output get identical math."""
+        assert _calculate_cost("sonnet", 1_000_000, 1_000_000) == pytest.approx(18.0)
+
+
+class TestCacheSavings:
+
+    def test_pure_read_savings_is_90_percent_of_input_rate(self):
+        """1M sonnet reads save (1 − 0.1) × $3 = $2.70 vs uncached billing."""
+        assert _calculate_cache_savings("sonnet", 0, 1_000_000) == pytest.approx(2.70)
+
+    def test_pure_creation_is_negative_25_percent_premium(self):
+        """1M sonnet writes cost an extra (1.25 − 1) × $3 = $0.75 over uncached."""
+        assert _calculate_cache_savings("sonnet", 1_000_000, 0) == pytest.approx(-0.75)
+
+    def test_amortized_after_a_few_reads(self):
+        """After one write + 4 reads the math should be net positive."""
+        # 100k creation → -$0.075 premium; 4×100k read → +4×$0.27 = $1.08 gain
+        result = _calculate_cache_savings("sonnet", 100_000, 400_000)
+        assert result == pytest.approx(-0.075 + 1.08)
+
+
+class TestApplyUsage:
+
+    def _fresh(self):
+        return _get_default_costs()
+
+    def test_records_cache_token_counts(self):
+        costs = self._fresh()
+        _apply_usage(
+            costs,
+            "claude-sonnet-4-6",
+            input_tokens=1000,
+            output_tokens=500,
+            cache_creation_tokens=2000,
+            cache_read_tokens=8000,
+        )
+        bucket = costs["by_model"]["sonnet"]
+        assert bucket["cache_creation_tokens"] == 2000
+        assert bucket["cache_read_tokens"] == 8000
+
+    def test_accumulates_across_calls(self):
+        costs = self._fresh()
+        for _ in range(3):
+            _apply_usage(
+                costs,
+                "claude-sonnet-4-6",
+                input_tokens=0,
+                output_tokens=0,
+                cache_read_tokens=100_000,
+            )
+        assert costs["by_model"]["sonnet"]["cache_read_tokens"] == 300_000
+
+    def test_cache_savings_aggregates(self):
+        """Top-level cache_savings rolls up net savings across calls."""
+        costs = self._fresh()
+        _apply_usage(
+            costs,
+            "claude-sonnet-4-6",
+            input_tokens=0,
+            output_tokens=0,
+            cache_read_tokens=1_000_000,  # +$2.70 saved
+        )
+        _apply_usage(
+            costs,
+            "claude-sonnet-4-6",
+            input_tokens=0,
+            output_tokens=0,
+            cache_creation_tokens=1_000_000,  # -$0.75 premium
+        )
+        assert costs["cache_savings"] == pytest.approx(2.70 - 0.75)
+
+    def test_legacy_call_signature_still_works(self):
+        """Callers passing only input/output (no cache args) still update correctly."""
+        costs = self._fresh()
+        _apply_usage(costs, "claude-sonnet-4-6", input_tokens=1000, output_tokens=500)
+        bucket = costs["by_model"]["sonnet"]
+        assert bucket["input_tokens"] == 1000
+        assert bucket["output_tokens"] == 500
+        assert bucket["cache_creation_tokens"] == 0
+        assert bucket["cache_read_tokens"] == 0
+        assert costs["cache_savings"] == 0.0

@@ -287,6 +287,11 @@ class ClaudeService:
             trace_name=trace_name,
         )
 
+        # Cache fields are only populated when prompt caching is in play;
+        # default to 0 so non-cached calls behave exactly as before.
+        cache_creation_tokens = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+
         # Track costs if project_id provided (also per-chat if chat_id set)
         if project_id:
             add_cost_usage(
@@ -294,7 +299,10 @@ class ClaudeService:
                 model=response.model,
                 input_tokens=response.usage.input_tokens,
                 output_tokens=response.usage.output_tokens,
+                user_id=user_id,
                 chat_id=chat_id,
+                cache_creation_tokens=cache_creation_tokens,
+                cache_read_tokens=cache_read_tokens,
             )
 
         # Return raw response data - all parsing happens in claude_parsing_utils
@@ -304,6 +312,8 @@ class ClaudeService:
             "usage": {
                 "input_tokens": response.usage.input_tokens,
                 "output_tokens": response.usage.output_tokens,
+                "cache_creation_input_tokens": cache_creation_tokens,
+                "cache_read_input_tokens": cache_read_tokens,
             },
             "stop_reason": response.stop_reason,
         }
@@ -368,13 +378,19 @@ class ClaudeService:
         trace_input = {"prompt": last_user_msg, "model": model, "message_count": len(messages)}
         response = self._run_tracked(_do_stream, opik_kwargs=opik_kwargs, trace_input=trace_input, trace_name=trace_name)
 
+        cache_creation_tokens = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+
         if project_id:
             add_cost_usage(
                 project_id=project_id,
                 model=response.model,
                 input_tokens=response.usage.input_tokens,
                 output_tokens=response.usage.output_tokens,
+                user_id=user_id,
                 chat_id=chat_id,
+                cache_creation_tokens=cache_creation_tokens,
+                cache_read_tokens=cache_read_tokens,
             )
 
         return {
@@ -383,6 +399,8 @@ class ClaudeService:
             "usage": {
                 "input_tokens": response.usage.input_tokens,
                 "output_tokens": response.usage.output_tokens,
+                "cache_creation_input_tokens": cache_creation_tokens,
+                "cache_read_input_tokens": cache_read_tokens,
             },
             "stop_reason": response.stop_reason,
         }

@@ -545,6 +545,10 @@ class MainChatService:
                 user_id=resolved_user_id,
                 chat_id=chat_id,
                 tags=["chat"],
+                # Opt the chat hot path into Anthropic prompt caching. The
+                # system prompt + tools array are stable within a chat
+                # session; cache hits are billed at 0.1× the input rate.
+                enable_prompt_cache=True,
             )
             if response_text.strip():
                 accumulated_text_parts.append(response_text)
@@ -648,6 +652,7 @@ class MainChatService:
                     user_id=resolved_user_id,
                     chat_id=chat_id,
                     tags=["chat"],
+                    enable_prompt_cache=True,
                 )
                 if response_text.strip():
                     accumulated_text_parts.append(response_text)

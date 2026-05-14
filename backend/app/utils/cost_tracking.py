@@ -160,14 +160,21 @@ def _load_chat_costs(chat_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _save_chat_costs(chat_id: str, costs: Dict[str, Any]) -> bool:
-    """Save cost tracking data for a chat to Supabase."""
+def _save_chat_costs(chat_id: str, costs: Dict[str, Any]) -> str:
+    """Save cost tracking data for a chat to Supabase.
+
+    Returns one of ``"ok"``, ``"missing"``, ``"error"`` — see
+    ``chat_service.update_chat_costs`` for semantics. ``"missing"``
+    means the chat row no longer exists (e.g. user deleted the chat
+    while the stream was still running); the caller should treat this
+    as expected operational state, not a failure.
+    """
     try:
         chat_service = _get_chat_service()
         return chat_service.update_chat_costs(chat_id, costs)
     except Exception as e:
         logger.error("Error saving chat costs for %s: %s", chat_id, e)
-        return False
+        return "error"
 
 
 def _empty_bucket() -> Dict[str, Any]:
@@ -331,7 +338,17 @@ def add_usage(
                 cache_read_tokens=cache_read_tokens,
             )
 
-            if not _save_chat_costs(chat_id, chat_costs):
+            save_status = _save_chat_costs(chat_id, chat_costs)
+            if save_status == "missing":
+                # Chat row gone (typically: user deleted the chat while
+                # the stream was still producing tokens). Expected
+                # operational state — log at INFO so it doesn't read as
+                # a real failure in the logs.
+                logger.info(
+                    "Skipping chat cost save for %s — chat row not found (likely deleted mid-stream)",
+                    chat_id,
+                )
+            elif save_status == "error":
                 logger.warning("Failed to save costs for chat %s", chat_id)
 
         # --- User period spend tracking (for per-user spending limits) ---

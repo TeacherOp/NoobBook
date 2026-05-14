@@ -590,19 +590,38 @@ class ChatService:
             return None
         return response.data[0].get("costs")
 
-    def update_chat_costs(self, chat_id: str, costs: Dict[str, Any]) -> bool:
+    def update_chat_costs(self, chat_id: str, costs: Dict[str, Any]) -> str:
         """
         Persist updated costs JSONB to a chat.
 
-        Used internally by cost_tracking._save_chat_costs.
+        Used internally by cost_tracking._save_chat_costs. Returns one
+        of three string sentinels so the caller can distinguish:
+
+        - ``"ok"``: the chat row existed and was updated.
+        - ``"missing"``: the UPDATE matched zero rows. This happens
+          when a chat is deleted mid-stream — Claude calls continue
+          producing tokens (and trying to persist costs) for several
+          seconds after the DELETE returns. We don't want to alarm
+          the operator with a "Failed to save costs" warning for the
+          user-deleted-their-chat case.
+        - ``"error"``: PostgREST / network error. The exception is
+          logged here and re-surfaced as this sentinel so the caller
+          can still WARN.
         """
-        response = (
-            self.supabase.table(self.table)
-            .update({"costs": costs})
-            .eq("id", chat_id)
-            .execute()
-        )
-        return bool(response.data)
+        try:
+            response = (
+                self.supabase.table(self.table)
+                .update({"costs": costs})
+                .eq("id", chat_id)
+                .execute()
+            )
+        except Exception as exc:
+            # Log here so the underlying exception isn't swallowed by
+            # the bool-return downstream consumer; cost tracking's
+            # warning is intentionally short.
+            logger.error("update_chat_costs failed for %s: %s", chat_id, exc)
+            return "error"
+        return "ok" if response.data else "missing"
 
 
 # Singleton instance for easy import

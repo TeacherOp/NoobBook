@@ -34,7 +34,10 @@ class CSVService:
     Claude analyzes the tool output and generates a concise summary.
     """
 
-    MAX_ITERATIONS = 5  # Simple analysis shouldn't need many iterations
+    # 10 (was 5) — 5 was too tight when Claude wants to call csv_analyzer
+    # more than once before summarising (e.g. profile then sample). The
+    # cost ceiling is small here since this runs on Haiku.
+    MAX_ITERATIONS = 10
     TERMINATION_TOOL = "return_csv_summary"
 
     def __init__(self):
@@ -121,9 +124,28 @@ class CSVService:
             tool_blocks = claude_parsing_utils.extract_tool_use_blocks(response)
 
             if not tool_blocks:
-                # No tool calls - check if end_turn
+                # Claude ended the turn without calling return_csv_summary.
+                # Previous behaviour was to `continue`, which just re-asked
+                # Claude with the same conversation — guaranteed to waste
+                # every remaining iteration on the same dead path
+                # (12 hits of "End turn without summary tool - unexpected"
+                # in prod). Treat the text Claude produced as the summary
+                # and exit cleanly.
                 if claude_parsing_utils.is_end_turn(response):
-                    logger.warning("End turn without summary tool - unexpected")
+                    text = claude_parsing_utils.extract_text(response).strip()
+                    if text:
+                        logger.info(
+                            "CSV analysis ended on text response (iter %d, no termination tool)",
+                            iteration,
+                        )
+                        return self._build_result(
+                            {"summary": text, "row_count": 0, "column_count": 0},
+                            iteration,
+                            total_input_tokens,
+                            total_output_tokens,
+                        )
+                    logger.warning("End turn with no text and no tool — bailing")
+                    break
                 continue
 
             # Process each tool call

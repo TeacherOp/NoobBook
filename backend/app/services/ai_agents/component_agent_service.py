@@ -42,7 +42,13 @@ class ComponentAgentService:
     def __init__(self):
         self._prompt_config = None
         self._tools = None
+        # Cache only successful reads. A FileNotFoundError leaves the cache
+        # as None so a later request will retry — important during partial
+        # rollouts where the worker boots before frontend_design.md lands
+        # on disk. We squelch the missing-file warning with a separate
+        # boolean so the log doesn't spam every iteration in that window.
         self._skill_text: Optional[str] = None
+        self._skill_missing_warned: bool = False
 
     def _load_config(self) -> Dict[str, Any]:
         if self._prompt_config is None:
@@ -50,24 +56,32 @@ class ComponentAgentService:
         return self._prompt_config
 
     def _load_skill(self) -> str:
-        """Read the frontend-design skill markdown (cached).
+        """Read the frontend-design skill markdown.
 
-        Failure here is non-fatal: if the file ever goes missing, we log a
-        warning once and the agent still runs — just without the extra
-        design discipline. Easier to debug than a hard crash that takes
-        the whole studio offline for a missing asset.
+        Successful reads are cached for the process lifetime. A missing
+        file is non-fatal and is NOT cached — so a delayed file deploy
+        (e.g. partial rollout where the python container started before
+        the markdown landed) recovers automatically on the next call.
+        The first missing-file event logs a warning; subsequent misses
+        are silent so we don't spam the log mid-run.
         """
         if self._skill_text is not None:
             return self._skill_text
         try:
-            self._skill_text = self.SKILL_PATH.read_text(encoding="utf-8")
+            text = self.SKILL_PATH.read_text(encoding="utf-8")
         except FileNotFoundError:
-            logger.warning(
-                "frontend-design skill not found at %s — proceeding without it",
-                self.SKILL_PATH,
-            )
-            self._skill_text = ""
-        return self._skill_text
+            if not self._skill_missing_warned:
+                logger.warning(
+                    "frontend-design skill not found at %s — proceeding without it (will retry on next call)",
+                    self.SKILL_PATH,
+                )
+                self._skill_missing_warned = True
+            return ""
+        self._skill_text = text
+        # Clear the warned flag so a future loss-then-recovery sequence
+        # still produces an informative log if the file disappears again.
+        self._skill_missing_warned = False
+        return text
 
     def _load_tools(self) -> List[Dict[str, Any]]:
         if self._tools is None:

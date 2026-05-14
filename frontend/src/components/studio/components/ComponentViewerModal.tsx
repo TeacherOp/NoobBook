@@ -113,8 +113,16 @@ export const ComponentViewerModal: React.FC<ComponentViewerModalProps> = ({
             older runs that landed as ready=[] still exist in the DB.
             Showing a real explanation + an Edit bar (so the user can
             retry with the saved variations_planned context) is much
-            better than rendering an empty dialog. */}
-        {viewingComponentJob && (!viewingComponentJob.components || viewingComponentJob.components.length === 0) && (
+            better than rendering an empty dialog.
+            Gated on terminal statuses only — `pending` and `processing`
+            jobs legitimately have zero components mid-flight, and
+            surfacing "Generation didn't finish" while it's still running
+            would be a wrong-state render the user would (rightly) read
+            as a bug. */}
+        {viewingComponentJob
+          && (!viewingComponentJob.components || viewingComponentJob.components.length === 0)
+          && !['pending', 'processing'].includes(viewingComponentJob.status)
+          && (
           <div className="py-6 flex flex-col gap-4">
             <div className="rounded-lg border border-amber-200 bg-amber-50/60 dark:bg-amber-950/20 dark:border-amber-900 p-4 text-sm">
               <p className="font-medium text-amber-900 dark:text-amber-200">

@@ -64,7 +64,23 @@ export const AdViewerModal: React.FC<AdViewerModalProps> = ({
 
   return (
     <>
-      <Dialog open={viewingAdJob !== null} onOpenChange={(open) => !open && onClose()}>
+      <Dialog
+        open={viewingAdJob !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            // Clear the lightbox index when the outer modal closes.
+            // Without this, the parent flipping `viewingAdJob` to null
+            // empties `lightboxImages` via the memo, which makes the
+            // lightbox `image` silently become null — Radix dismisses
+            // without firing onOpenChange on the inner Dialog, so the
+            // index stays at its last value. Opening any future Ad job
+            // whose gallery has an element at that stored index would
+            // re-open the lightbox without user input.
+            setLightboxIndex(null);
+            onClose();
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">

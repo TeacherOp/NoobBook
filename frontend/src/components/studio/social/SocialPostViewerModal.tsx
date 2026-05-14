@@ -110,7 +110,20 @@ export const SocialPostViewerModal: React.FC<SocialPostViewerModalProps> = ({
 
   return (
    <>
-    <Dialog open={viewingSocialPostJob !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog
+      open={viewingSocialPostJob !== null}
+      onOpenChange={(open) => {
+        if (!open) {
+          // Clear the lightbox index when the outer modal closes — same
+          // reason as AdViewerModal: the gallery is derived from the
+          // parent prop, so a null parent would silently dismiss the
+          // lightbox without firing onOpenChange, leaving the index
+          // stale and ready to auto-open on the next compatible job.
+          setLightboxIndex(null);
+          onClose();
+        }
+      }}
+    >
       <DialogContent className={`${dialogMaxWidth} max-h-[90vh] overflow-y-auto flex flex-col`}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

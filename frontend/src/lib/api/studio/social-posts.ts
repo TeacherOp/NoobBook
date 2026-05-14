@@ -44,7 +44,6 @@ export interface SocialPostJob {
   status: JobStatus;
   progress: string;
   error: string | null;
-  partial_images?: string[];
   posts: SocialPost[];
   topic_summary: string | null;
   post_count: number;

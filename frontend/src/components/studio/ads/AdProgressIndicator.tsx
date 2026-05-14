@@ -8,7 +8,6 @@ import { SpinnerGap } from '@phosphor-icons/react';
 import type { AdJob } from '@/lib/api/studio';
 import { cancelStudioJob } from '@/lib/api/studio';
 import { StopHoldButton } from '../shared/StopHoldButton';
-import { PartialImagesPreview } from '../shared/PartialImagesPreview';
 
 interface AdProgressIndicatorProps {
   currentAdJob: AdJob | null;
@@ -43,7 +42,6 @@ export const AdProgressIndicator: React.FC<AdProgressIndicatorProps> = ({
           <StopHoldButton onConfirm={handleCancel} size="sm" />
         )}
       </div>
-      <PartialImagesPreview urls={currentAdJob.partial_images} />
     </div>
   );
 };

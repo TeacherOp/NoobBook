@@ -9,7 +9,6 @@ import { SpinnerGap } from '@phosphor-icons/react';
 import type { SocialPostJob } from '@/lib/api/studio';
 import { cancelStudioJob } from '@/lib/api/studio';
 import { StopHoldButton } from '../shared/StopHoldButton';
-import { PartialImagesPreview } from '../shared/PartialImagesPreview';
 
 interface SocialPostProgressIndicatorProps {
   currentSocialPostJob: SocialPostJob | null;
@@ -44,7 +43,6 @@ export const SocialPostProgressIndicator: React.FC<SocialPostProgressIndicatorPr
           <StopHoldButton onConfirm={handleCancel} size="sm" />
         )}
       </div>
-      <PartialImagesPreview urls={currentSocialPostJob.partial_images} />
     </div>
   );
 };

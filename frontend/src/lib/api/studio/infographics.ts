@@ -39,7 +39,6 @@ export interface InfographicJob {
   status: JobStatus;
   progress: string;
   error: string | null;
-  partial_images?: string[];
   topic_title: string | null;
   topic_summary: string | null;
   key_sections: InfographicKeySection[];

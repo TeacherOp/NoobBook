@@ -9,7 +9,6 @@ import { SpinnerGap } from '@phosphor-icons/react';
 import type { WebsiteJob } from '@/lib/api/studio';
 import { cancelStudioJob } from '@/lib/api/studio';
 import { StopHoldButton } from '../shared/StopHoldButton';
-import { PartialImagesPreview } from '../shared/PartialImagesPreview';
 
 interface WebsiteProgressIndicatorProps {
   currentWebsiteJob: WebsiteJob | null;
@@ -44,7 +43,6 @@ export const WebsiteProgressIndicator: React.FC<WebsiteProgressIndicatorProps> =
           <StopHoldButton onConfirm={handleCancel} size="sm" />
         )}
       </div>
-      <PartialImagesPreview urls={currentWebsiteJob.partial_images} />
     </div>
   );
 };

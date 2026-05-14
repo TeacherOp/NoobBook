@@ -9,7 +9,6 @@ import { SpinnerGap } from '@phosphor-icons/react';
 import type { InfographicJob } from '@/lib/api/studio';
 import { cancelStudioJob } from '@/lib/api/studio';
 import { StopHoldButton } from '../shared/StopHoldButton';
-import { PartialImagesPreview } from '../shared/PartialImagesPreview';
 
 interface InfographicProgressIndicatorProps {
   currentInfographicJob: InfographicJob | null;
@@ -44,7 +43,6 @@ export const InfographicProgressIndicator: React.FC<InfographicProgressIndicator
           <StopHoldButton onConfirm={handleCancel} size="sm" />
         )}
       </div>
-      <PartialImagesPreview urls={currentInfographicJob.partial_images} />
     </div>
   );
 };

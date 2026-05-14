@@ -9,7 +9,6 @@ import { Article, Spinner } from '@phosphor-icons/react';
 import type { BlogJob } from '@/lib/api/studio';
 import { cancelStudioJob } from '@/lib/api/studio';
 import { StopHoldButton } from '../shared/StopHoldButton';
-import { PartialImagesPreview } from '../shared/PartialImagesPreview';
 
 interface BlogProgressIndicatorProps {
   currentBlogJob: BlogJob | null;
@@ -59,7 +58,6 @@ export const BlogProgressIndicator: React.FC<BlogProgressIndicatorProps> = ({ cu
           <StopHoldButton onConfirm={handleCancel} size="sm" />
         )}
       </div>
-      <PartialImagesPreview urls={currentBlogJob?.partial_images} className="mt-0" />
     </div>
   );
 };

@@ -41,6 +41,16 @@ class BrandContextLoader:
         but studio agents still pass project_id. This bridge method
         ensures backward compatibility with zero changes to agents.
 
+        Uses ``get_project_owner_id`` (lookup by id only) rather than
+        ``get_project`` — the latter is user-scoped (``WHERE id = ? AND
+        user_id = ?``) and falls back to ``DEFAULT_USER_ID`` when no
+        user_id is passed. Studio background jobs (presentation,
+        business_report, blog, etc.) call this helper WITHOUT a
+        user_id, so the user-scoped lookup silently returned None for
+        any project not owned by DEFAULT_USER_ID — every Studio job on
+        such projects was running with brand styling stripped, and the
+        only signal was the "could not resolve user_id" warning.
+
         Args:
             project_id: The project UUID
 
@@ -48,10 +58,7 @@ class BrandContextLoader:
             The user_id who owns the project, or None if not found
         """
         from app.services.data_services import project_service
-        project = project_service.get_project(project_id)
-        if not project:
-            return None
-        return project.get("user_id")
+        return project_service.get_project_owner_id(project_id)
 
     def load_brand_context(
         self,

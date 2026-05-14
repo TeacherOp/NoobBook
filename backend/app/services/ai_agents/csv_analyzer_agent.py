@@ -247,6 +247,14 @@ class CSVAnalyzerAgent:
             total_output_tokens += synthesis_usage.get("output_tokens", 0)
             synthesis_text = claude_parsing_utils.extract_text(synthesis_response).strip()
             if synthesis_text:
+                # Append the synthesis assistant content to messages
+                # BEFORE _save_execution so the saved transcript ends
+                # with the answer the user actually saw — same shape as
+                # the end-turn-text branch above. The synthesis call ran
+                # with tools=None, so its content_blocks are pure text.
+                synthesis_blocks = synthesis_response.get("content_blocks", [])
+                synthesis_serialized = claude_parsing_utils.serialize_content_blocks(synthesis_blocks)
+                messages.append({"role": "assistant", "content": synthesis_serialized})
                 final_result = self._build_result(
                     {"summary": synthesis_text, "image_paths": generated_plots},
                     self.MAX_ITERATIONS,

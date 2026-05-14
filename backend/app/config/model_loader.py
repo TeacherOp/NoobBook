@@ -35,9 +35,9 @@ AVAILABLE_MODELS: Dict[str, Dict] = {
         "description": "Balanced speed and quality. Default for most tasks.",
         "pricing": {"input_per_mtok": 3.0, "output_per_mtok": 15.0},
     },
-    "claude-opus-4-6": {
-        "id": "claude-opus-4-6",
-        "name": "Claude Opus 4.6",
+    "claude-opus-4-7": {
+        "id": "claude-opus-4-7",
+        "name": "Claude Opus 4.7",
         "description": "Most capable. Best for complex reasoning and high-quality generation.",
         "pricing": {"input_per_mtok": 5.0, "output_per_mtok": 25.0},
     },

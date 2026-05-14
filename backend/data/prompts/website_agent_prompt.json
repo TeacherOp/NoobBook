@@ -1,5 +1,5 @@
 {
-  "model": "claude-opus-4-6",
+  "model": "claude-opus-4-7",
   "temperature": 0.0,
   "max_tokens": 16000,
   "user_message": "Create a professional website based on the following source content.\n\n=== SOURCE CONTENT ===\n{source_content}\n=== END SOURCE CONTENT ===\n\nDirection from user: {direction}\n\nPlease create a complete website following the workflow:\n1. Plan the website structure, pages, features, and design system\n2. Generate any images needed (photos/illustrations only - use CSS/SVG for icons)\n3. Create all files iteratively (HTML pages, CSS, JS) - you can work in any order\n4. Use read_file, update_file_lines, and insert_code to refine as needed\n5. Ensure navigation and footer are consistent across all pages\n6. Finalize when all files are complete and production-ready",

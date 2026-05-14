@@ -107,6 +107,40 @@ export const ComponentViewerModal: React.FC<ComponentViewerModalProps> = ({
           )}
         </DialogHeader>
 
+        {/* Empty-state body. A finished job can legitimately have zero
+            components if the model's tool call was truncated mid-output
+            (max_tokens hit) — the agent now marks those as error, but
+            older runs that landed as ready=[] still exist in the DB.
+            Showing a real explanation + an Edit bar (so the user can
+            retry with the saved variations_planned context) is much
+            better than rendering an empty dialog. */}
+        {viewingComponentJob && (!viewingComponentJob.components || viewingComponentJob.components.length === 0) && (
+          <div className="py-6 flex flex-col gap-4">
+            <div className="rounded-lg border border-amber-200 bg-amber-50/60 dark:bg-amber-950/20 dark:border-amber-900 p-4 text-sm">
+              <p className="font-medium text-amber-900 dark:text-amber-200">
+                {viewingComponentJob.status === 'error'
+                  ? 'Generation didn’t finish'
+                  : 'No components to show yet'}
+              </p>
+              <p className="text-amber-800 dark:text-amber-300 mt-1">
+                {viewingComponentJob.error_message
+                  || 'The model finished without writing component code. This usually means the output ran past the token cap or the tool call was malformed. Use the prompt below to retry — the saved plan will be reused.'}
+              </p>
+              {viewingComponentJob.variations_planned?.length ? (
+                <p className="text-xs text-amber-700 dark:text-amber-400 mt-2">
+                  {viewingComponentJob.variations_planned.length} variation{viewingComponentJob.variations_planned.length === 1 ? '' : 's'} were planned: {viewingComponentJob.variations_planned.map((v) => v.variation_name).join(', ')}.
+                </p>
+              ) : null}
+            </div>
+            {onEdit && (
+              <ComponentEditBar key={viewingComponentJob?.id || 'component-empty-edit'} onEdit={onEdit} />
+            )}
+            <p className="text-xs text-muted-foreground">
+              Generated from: {viewingComponentJob.source_name || 'unknown source'}
+            </p>
+          </div>
+        )}
+
         {/* Component Variations */}
         {viewingComponentJob?.components && viewingComponentJob.components.length > 0 && (
           <div className="py-4">

@@ -720,7 +720,7 @@ export interface ModelCategory {
   env_var: string;
 }
 
-// { chat: "claude-opus-4-6" | null, studio: ..., query: ..., extraction: ... }
+// { chat: "claude-opus-4-7" | null, studio: ..., query: ..., extraction: ... }
 export type ModelSettings = Record<string, string | null>;
 
 // { chat: { "claude-sonnet-4-6": ["default"], "claude-haiku-4-5-20251001": ["chat_naming", "memory"] }, ... }

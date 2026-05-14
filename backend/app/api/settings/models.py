@@ -47,7 +47,7 @@ def get_model_settings():
         {
             "success": true,
             "settings": {
-                "chat": "claude-opus-4-6" | null,
+                "chat": "claude-opus-4-7" | null,
                 "studio": "claude-haiku-4-5-20251001" | null,
                 "query": null,
                 "extraction": null
@@ -88,7 +88,7 @@ def update_model_settings():
 
     Request body:
         {
-            "chat": "claude-opus-4-6",          // set override
+            "chat": "claude-opus-4-7",          // set override
             "studio": null,                      // clear override (use Default)
             "query": "claude-haiku-4-5-20251001",
             "extraction": null

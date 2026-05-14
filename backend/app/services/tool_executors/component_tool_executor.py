@@ -197,6 +197,39 @@ class ComponentToolExecutor:
         components = tool_input.get("components", [])
         usage_notes = tool_input.get("usage_notes", "")
 
+        # Belt-and-braces guard. The agent loop in component_agent_service
+        # already detects stop_reason == "max_tokens" and bails before we
+        # reach here, but a different failure (malformed tool input, schema
+        # drift, etc.) could still hand us an empty components array. If
+        # that happens, mark the job as error — never as ready — so the
+        # frontend doesn't surface a misleading "Components generated
+        # successfully" message with nothing to show. See PR investigation
+        # of job b6bbe1fd-... for the original silent-failure trace.
+        if not components:
+            error_msg = (
+                "Model returned no components in the termination tool call. "
+                "This usually means the output was truncated. Try regenerating, "
+                "or simplify the request (fewer variations, shorter HTML)."
+            )
+            logger.error(
+                "write_component_code received empty components for job %s — marking error",
+                job_id[:8],
+            )
+            studio_index_service.update_component_job(
+                project_id, job_id,
+                status="error",
+                error_message=error_msg,
+                iterations=iterations,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                completed_at=datetime.now().isoformat(),
+            )
+            return {
+                "success": False,
+                "error_message": error_msg,
+                "iterations": iterations,
+                "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+            }
 
         try:
             # Save each component as HTML file to Supabase Storage

@@ -1,5 +1,5 @@
 {
-  "model": "claude-opus-4-6",
+  "model": "claude-opus-4-7",
   "temperature": 0.0,
   "max_tokens": 16000,
   "user_message": "Create a professional presentation based on the following source content.\n\n=== SOURCE CONTENT ===\n{source_content}\n=== END SOURCE CONTENT ===\n\nDirection from user: {direction}\n\nPlease create a complete presentation following the workflow:\n1. Plan the presentation structure (slides, content distribution, design)\n2. Create base-styles.css with brand colors as CSS variables\n3. Create each slide sequentially (slide_01.html, slide_02.html, etc.)\n4. Finalize when all slides are complete",

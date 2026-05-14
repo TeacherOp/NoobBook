@@ -20,6 +20,7 @@ import { businessReportsAPI, type BusinessReportJob } from '@/lib/api/studio';
 import { getAuthUrl } from '@/lib/api/client';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ImageLightbox, type LightboxImage } from '../shared/ImageLightbox';
 
 interface BusinessReportViewerModalProps {
   projectId: string;
@@ -43,6 +44,8 @@ export const BusinessReportViewerModal: React.FC<BusinessReportViewerModalProps>
   const [markdownContent, setMarkdownContent] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [editInput, setEditInput] = useState('');
+  // Single-image lightbox state for embedded charts.
+  const [lightboxImage, setLightboxImage] = useState<LightboxImage | null>(null);
 
   // Fetch markdown content when job changes
   useEffect(() => {
@@ -94,6 +97,7 @@ export const BusinessReportViewerModal: React.FC<BusinessReportViewerModalProps>
   };
 
   return (
+   <>
     <Dialog open={viewingBusinessReportJob !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-4xl h-[85vh] p-0 flex flex-col">
         <DialogHeader className="px-6 py-4 border-b flex-shrink-0">
@@ -166,20 +170,34 @@ export const BusinessReportViewerModal: React.FC<BusinessReportViewerModalProps>
                     h3: ({ children }) => (
                       <h3 className="text-lg font-medium mt-4 mb-2 text-foreground">{children}</h3>
                     ),
-                    // Style images (charts from ai_outputs/images/)
+                    // Style images (charts from ai_outputs/images/).
+                    // Wrapped in a button so a click opens the shared
+                    // lightbox with a Download button.
                     img: ({ src, alt }) => {
                       // Handle chart URLs - they may be relative API paths
                       // getAuthUrl handles both /api/ paths and full URLs
                       const imageSrc = src?.startsWith('/api/')
                         ? getAuthUrl(src)
                         : src;
+                      if (!imageSrc) return null;
                       return (
                         <figure className="my-4">
-                          <img
-                            src={imageSrc}
-                            alt={alt || 'Chart'}
-                            className="rounded-lg max-w-full h-auto shadow-md border border-border"
-                          />
+                          <button
+                            type="button"
+                            onClick={() => setLightboxImage({
+                              url: imageSrc,
+                              alt: alt || 'Chart',
+                              caption: alt || undefined,
+                            })}
+                            aria-label={`Open full-size view of ${alt || 'chart'}`}
+                            className="block w-full cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-amber-500 rounded-lg"
+                          >
+                            <img
+                              src={imageSrc}
+                              alt={alt || 'Chart'}
+                              className="rounded-lg max-w-full h-auto shadow-md border border-border"
+                            />
+                          </button>
                           {alt && (
                             <figcaption className="text-center text-sm text-muted-foreground mt-2 italic">
                               {alt}
@@ -284,5 +302,12 @@ export const BusinessReportViewerModal: React.FC<BusinessReportViewerModalProps>
         )}
       </DialogContent>
     </Dialog>
+
+    <ImageLightbox
+      open={lightboxImage !== null}
+      image={lightboxImage}
+      onClose={() => setLightboxImage(null)}
+    />
+   </>
   );
 };

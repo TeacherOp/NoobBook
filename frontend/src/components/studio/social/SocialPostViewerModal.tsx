@@ -4,7 +4,7 @@
  * Features: Platform-specific styling, images with download, copy to clipboard.
  */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -14,11 +14,12 @@ import {
 } from '../../ui/dialog';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
-import { ShareNetwork, DownloadSimple, PencilSimple } from '@phosphor-icons/react';
+import { ShareNetwork, PencilSimple } from '@phosphor-icons/react';
 import { useToast } from '../../ui/use-toast';
 import type { SocialPostJob } from '@/lib/api/studio';
 import { getAuthUrl } from '@/lib/api/client';
 import { copyToClipboard } from '@/lib/clipboard';
+import { ImageLightbox, type LightboxImage } from '../shared/ImageLightbox';
 
 interface SocialPostViewerModalProps {
   viewingSocialPostJob: SocialPostJob | null;
@@ -75,6 +76,28 @@ export const SocialPostViewerModal: React.FC<SocialPostViewerModalProps> = ({
   const { success: showSuccess, error: showError } = useToast();
   const postCount = viewingSocialPostJob?.posts.length || 0;
 
+  // Build a lightbox gallery from posts that actually have an image_url.
+  // Also precompute a post-index → gallery-index map so the thumbnail
+  // click handler can open the lightbox at the right slot in O(1) without
+  // re-scanning the post list at render time.
+  const { lightboxImages, postIndexToGalleryIndex } = useMemo(() => {
+    const images: LightboxImage[] = [];
+    const map: Record<number, number> = {};
+    viewingSocialPostJob?.posts.forEach((post, postIndex) => {
+      if (post.image_url) {
+        map[postIndex] = images.length;
+        images.push({
+          url: getAuthUrl(post.image_url),
+          alt: `${post.platform} post`,
+          filename: post.image?.filename,
+          caption: post.platform === 'twitter' ? 'X (Twitter)' : post.platform,
+        });
+      }
+    });
+    return { lightboxImages: images, postIndexToGalleryIndex: map };
+  }, [viewingSocialPostJob?.posts]);
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+
   // Responsive grid: 1 post = centered single col, 2 = 2-col, 3 = 3-col
   const gridClass = postCount === 1
     ? 'grid grid-cols-1 max-w-sm mx-auto gap-6 py-4'
@@ -86,6 +109,7 @@ export const SocialPostViewerModal: React.FC<SocialPostViewerModalProps> = ({
   const dialogMaxWidth = postCount === 1 ? 'sm:max-w-lg' : 'sm:max-w-4xl';
 
   return (
+   <>
     <Dialog open={viewingSocialPostJob !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className={`${dialogMaxWidth} max-h-[90vh] overflow-y-auto flex flex-col`}>
         <DialogHeader>
@@ -125,31 +149,23 @@ export const SocialPostViewerModal: React.FC<SocialPostViewerModalProps> = ({
 
               {/* Image */}
               {post.image_url && (
-                <div className="relative group">
+                <button
+                  type="button"
+                  onClick={() => setLightboxIndex(postIndexToGalleryIndex[index] ?? null)}
+                  aria-label={`Open full-size view of ${post.platform} post`}
+                  className="relative group cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-amber-500"
+                >
                   <img
                     src={getAuthUrl(post.image_url)}
                     alt={`${post.platform} post`}
                     className="w-full h-auto object-cover"
                   />
-                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="gap-1"
-                      onClick={() => {
-                        if (post.image?.filename && post.image_url) {
-                          const link = document.createElement('a');
-                          link.href = getAuthUrl(post.image_url);
-                          link.download = post.image.filename;
-                          link.click();
-                        }
-                      }}
-                    >
-                      <DownloadSimple size={14} />
-                      Download
-                    </Button>
+                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center pointer-events-none">
+                    <span className="text-white text-xs font-medium tracking-wide bg-black/40 rounded-full px-3 py-1">
+                      Click to enlarge
+                    </span>
                   </div>
-                </div>
+                </button>
               )}
 
               {/* Copy/Caption */}
@@ -196,5 +212,15 @@ export const SocialPostViewerModal: React.FC<SocialPostViewerModalProps> = ({
         )}
       </DialogContent>
     </Dialog>
+
+    <ImageLightbox
+      open={lightboxIndex !== null}
+      image={lightboxIndex !== null ? lightboxImages[lightboxIndex] ?? null : null}
+      images={lightboxImages}
+      index={lightboxIndex ?? undefined}
+      onIndexChange={setLightboxIndex}
+      onClose={() => setLightboxIndex(null)}
+    />
+   </>
   );
 };

@@ -20,6 +20,7 @@ import { blogsAPI, type BlogJob } from '@/lib/api/studio';
 import { getAuthUrl } from '@/lib/api/client';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ImageLightbox, type LightboxImage } from '../shared/ImageLightbox';
 
 interface BlogViewerModalProps {
   projectId: string;
@@ -43,6 +44,11 @@ export const BlogViewerModal: React.FC<BlogViewerModalProps> = ({
   const [markdownContent, setMarkdownContent] = useState<string>('');
   const [editInput, setEditInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  // Single-image lightbox state — markdown images are clicked one at a
+  // time. We don't try to build a gallery of every embedded image
+  // because the model can interleave them with text and the order isn't
+  // semantically meaningful for navigation.
+  const [lightboxImage, setLightboxImage] = useState<LightboxImage | null>(null);
 
   // Fetch markdown content when job changes
   useEffect(() => {
@@ -84,6 +90,7 @@ export const BlogViewerModal: React.FC<BlogViewerModalProps> = ({
   const imageCount = viewingBlogJob?.images?.length || 0;
 
   return (
+   <>
     <Dialog open={viewingBlogJob !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="sm:max-w-4xl h-[85vh] p-0 flex flex-col">
         <DialogHeader className="px-6 py-4 border-b flex-shrink-0">
@@ -151,20 +158,34 @@ export const BlogViewerModal: React.FC<BlogViewerModalProps> = ({
                     h3: ({ children }) => (
                       <h3 className="text-lg font-medium mt-4 mb-2 text-foreground">{children}</h3>
                     ),
-                    // Style images with proper API URL
+                    // Style images with proper API URL. Wrapped in a
+                    // button so a click opens the shared lightbox where
+                    // the user can decide whether to download.
                     img: ({ src, alt }) => {
                       // Handle IMAGE_N placeholders or direct URLs
                       // getAuthUrl handles both /api/ paths and full URLs
                       const imageSrc = src?.startsWith('/api/')
                         ? getAuthUrl(src)
                         : src;
+                      if (!imageSrc) return null;
                       return (
                         <figure className="my-4">
-                          <img
-                            src={imageSrc}
-                            alt={alt || 'Blog image'}
-                            className="rounded-lg max-w-full h-auto shadow-md"
-                          />
+                          <button
+                            type="button"
+                            onClick={() => setLightboxImage({
+                              url: imageSrc,
+                              alt: alt || 'Blog image',
+                              caption: alt || undefined,
+                            })}
+                            aria-label={`Open full-size view of ${alt || 'blog image'}`}
+                            className="block w-full cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-amber-500 rounded-lg"
+                          >
+                            <img
+                              src={imageSrc}
+                              alt={alt || 'Blog image'}
+                              className="rounded-lg max-w-full h-auto shadow-md"
+                            />
+                          </button>
                           {alt && (
                             <figcaption className="text-center text-sm text-muted-foreground mt-2 italic">
                               {alt}
@@ -269,5 +290,12 @@ export const BlogViewerModal: React.FC<BlogViewerModalProps> = ({
         )}
       </DialogContent>
     </Dialog>
+
+    <ImageLightbox
+      open={lightboxImage !== null}
+      image={lightboxImage}
+      onClose={() => setLightboxImage(null)}
+    />
+   </>
   );
 };

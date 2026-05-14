@@ -131,8 +131,34 @@ class CSVAnalyzerAgent:
             # Appending first then doing `continue` would leave messages ending
             # with an assistant role, causing a prefill API error on the next iteration.
             if not tool_blocks:
+                # Claude ended the turn without calling return_analysis.
+                # Previously this just `continue`d, which guaranteed we
+                # burned every remaining iteration on the same dead path
+                # (and contributed to the 27 "Max iterations reached (20)"
+                # warnings in prod). Accept the text answer instead.
                 if claude_parsing_utils.is_end_turn(response):
-                    logger.warning("End turn without return_analysis tool")
+                    text = claude_parsing_utils.extract_text(response).strip()
+                    if text:
+                        logger.info(
+                            "CSV analyzer ended on text response (iter %d, no termination tool)",
+                            iteration,
+                        )
+                        final_result = self._build_result(
+                            {
+                                "summary": text,
+                                "image_paths": generated_plots,
+                            },
+                            iteration,
+                            total_input_tokens,
+                            total_output_tokens,
+                        )
+                        self._save_execution(
+                            project_id, execution_id, query, messages,
+                            final_result, started_at, source_id,
+                        )
+                        return final_result
+                    logger.warning("End turn with no text and no tool — bailing")
+                    break
                 continue
 
             serialized_content = claude_parsing_utils.serialize_content_blocks(content_blocks)
@@ -185,7 +211,46 @@ class CSVAnalyzerAgent:
                 tool_results_content = claude_parsing_utils.build_tool_result_content(tool_results_data)
                 messages.append({"role": "user", "content": tool_results_content})
 
-        logger.warning("Max iterations reached (%d)", self.MAX_ITERATIONS)
+        logger.warning("Max iterations reached (%d) — forcing tool-less synthesis", self.MAX_ITERATIONS)
+
+        # Same shape as the main-chat synthesis fallback (commit c60393a):
+        # the loop has expensive context — run_analysis tool results,
+        # generated plots, partial reasoning — that the user paid for.
+        # Force one more Claude call with tools=None so the model can
+        # only emit prose, and surface that as the answer. Falls through
+        # to the original error_result only if even this call fails.
+        try:
+            synthesis_response = claude_service.send_message(
+                messages=messages,
+                system_prompt=config.get("system_prompt", ""),
+                model=config.get("model"),
+                max_tokens=config.get("max_tokens"),
+                temperature=config.get("temperature"),
+                tools=None,
+                project_id=project_id,
+                tags=["query", "synthesis_fallback"],
+                chat_id=chat_id,
+                user_id=user_id,
+            )
+            synthesis_usage = synthesis_response.get("usage", {})
+            total_input_tokens += synthesis_usage.get("input_tokens", 0)
+            total_output_tokens += synthesis_usage.get("output_tokens", 0)
+            synthesis_text = claude_parsing_utils.extract_text(synthesis_response).strip()
+            if synthesis_text:
+                final_result = self._build_result(
+                    {"summary": synthesis_text, "image_paths": generated_plots},
+                    self.MAX_ITERATIONS,
+                    total_input_tokens,
+                    total_output_tokens,
+                )
+                self._save_execution(
+                    project_id, execution_id, query, messages,
+                    final_result, started_at, source_id,
+                )
+                return final_result
+        except Exception as exc:
+            logger.warning("CSV analyzer synthesis fallback failed: %s", exc)
+
         error_result = {
             "success": False,
             "error": f"Analysis did not complete within {self.MAX_ITERATIONS} iterations",

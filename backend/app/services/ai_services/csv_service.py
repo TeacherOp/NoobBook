@@ -138,8 +138,13 @@ class CSVService:
                             "CSV analysis ended on text response (iter %d, no termination tool)",
                             iteration,
                         )
+                        # Claude produced only prose — it never called the
+                        # csv_analyzer tool, so we have no real row/column
+                        # counts to report. Use None (not 0) so a frontend
+                        # that displays row/column metadata can render
+                        # "—" rather than silently showing "0 rows".
                         return self._build_result(
-                            {"summary": text, "row_count": 0, "column_count": 0},
+                            {"summary": text, "row_count": None, "column_count": None},
                             iteration,
                             total_input_tokens,
                             total_output_tokens,

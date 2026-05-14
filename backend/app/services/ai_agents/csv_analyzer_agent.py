@@ -143,6 +143,16 @@ class CSVAnalyzerAgent:
                             "CSV analyzer ended on text response (iter %d, no termination tool)",
                             iteration,
                         )
+                        # Append the final assistant content to messages
+                        # BEFORE save_execution so the saved transcript
+                        # ends with the answer that was actually returned
+                        # to the user. The "defer-append" pattern at the
+                        # top of this block is to keep messages ending
+                        # with a user role when we `continue` — but this
+                        # is a terminal `return`, so appending here is
+                        # both safe and necessary.
+                        serialized_content = claude_parsing_utils.serialize_content_blocks(content_blocks)
+                        messages.append({"role": "assistant", "content": serialized_content})
                         final_result = self._build_result(
                             {
                                 "summary": text,

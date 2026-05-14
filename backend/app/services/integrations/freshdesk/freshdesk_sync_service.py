@@ -419,14 +419,30 @@ class FreshdeskSyncService:
 
                 # PGRST303 → JWT expired on the cached service-role
                 # client. Rebuild and retry the same rows once.
-                if "PGRST303" in err_str and not jwt_recovery_done:
-                    jwt_recovery_done = True
-                    logger.warning(
-                        "Supabase service-role JWT expired (PGRST303); resetting client and retrying batch (%d rows)",
+                if "PGRST303" in err_str:
+                    if not jwt_recovery_done:
+                        jwt_recovery_done = True
+                        logger.warning(
+                            "Supabase service-role JWT expired (PGRST303); resetting client and retrying batch (%d rows)",
+                            len(rows),
+                        )
+                        SupabaseClient.reset()
+                        return _try(rows)
+                    # Recovery already attempted and PGRST303 came back.
+                    # Don't fall into the halving branch — every smaller
+                    # sub-batch will hit the same expired JWT, end up at
+                    # len(rows) == 1, and emit N "Upsert dropped" errors
+                    # without ever pointing at the real cause. Emit one
+                    # actionable CRITICAL and abandon the rest of the
+                    # batch so the operator has a clear signal.
+                    logger.critical(
+                        "Supabase service-role JWT still expired after client reset — "
+                        "the SUPABASE_SERVICE_KEY env value itself is stale. "
+                        "Rotate the key in the deployment and restart. "
+                        "Dropping %d ticket(s) in this batch.",
                         len(rows),
                     )
-                    SupabaseClient.reset()
-                    return _try(rows)
+                    return 0
 
                 # Single row that still failed → drop it, log with
                 # ticket_id so the operator can investigate the

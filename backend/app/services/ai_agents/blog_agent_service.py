@@ -27,7 +27,7 @@ class BlogAgentService:
     """Blog post generation agent - orchestration only."""
 
     AGENT_NAME = "blog_agent"
-    MAX_ITERATIONS = 20
+    MAX_ITERATIONS = 40
 
     def __init__(self):
         self._prompt_config = None

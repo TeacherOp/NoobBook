@@ -41,7 +41,7 @@ class AudioOverviewService:
     """
 
     AGENT_NAME = "audio_overview"
-    MAX_ITERATIONS = 25  # Reasonable limit - most scripts finish in 5-15 iterations
+    MAX_ITERATIONS = 40  # Ceiling for large scripts; most finish in 5-15 iterations
 
     def __init__(self):
         """Initialize service with lazy-loaded config and tools."""

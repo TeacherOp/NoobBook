@@ -31,7 +31,7 @@ class WireframeAgentService:
     """Wireframe generation agent - orchestration with agentic loop."""
 
     AGENT_NAME = "wireframe_agent"
-    MAX_ITERATIONS = 15  # Allow enough iterations for complex wireframes
+    MAX_ITERATIONS = 40  # Allow enough iterations for complex wireframes
 
     def __init__(self):
         self._prompt_config = None

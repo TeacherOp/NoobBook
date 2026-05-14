@@ -85,13 +85,13 @@ class MainChatService:
     """
 
     # Maximum tool iterations to prevent infinite loops.
-    # 25 gives multi-part questions (e.g. a Freshdesk analysis asking
-    # 6–8 distinct things at once) enough rounds for the model to run
-    # the sub-agent several times, store memory, and still narrate the
-    # answer. Each round is one full Claude call, so the worst-case
-    # spend per turn scales linearly — the synthesis fallback below
-    # caps the "burnt budget with no visible response" failure mode.
-    MAX_TOOL_ITERATIONS = 25
+    # 40 matches the ceiling used across every other agent in the
+    # codebase (database_analyzer, presentation_agent, and now all the
+    # rest). Most multi-part chats use far fewer rounds in practice —
+    # the synthesis fallback below catches the worst-case
+    # "burnt budget with no visible response" mode, so we'd rather give
+    # complex questions room to finish than clip them early.
+    MAX_TOOL_ITERATIONS = 40
 
     def __init__(self):
         """Initialize the service."""

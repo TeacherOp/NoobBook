@@ -36,7 +36,7 @@ class DeepResearchAgent:
     """
 
     AGENT_NAME = "deep_research"
-    MAX_ITERATIONS = 15
+    MAX_ITERATIONS = 40
 
     def __init__(self):
         """Initialize agent with lazy-loaded config and tools."""

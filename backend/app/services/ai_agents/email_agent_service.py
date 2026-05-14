@@ -31,7 +31,7 @@ class EmailAgentService:
     """Email template generation agent - orchestration only."""
 
     AGENT_NAME = "email_agent"
-    MAX_ITERATIONS = 15
+    MAX_ITERATIONS = 40
 
     def __init__(self):
         self._prompt_config = None

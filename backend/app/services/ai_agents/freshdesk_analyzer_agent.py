@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class FreshdeskAnalyzerAgent:
     AGENT_NAME = "freshdesk_analyzer_agent"
-    MAX_ITERATIONS = 15
+    MAX_ITERATIONS = 40
     TERMINATION_TOOL = "return_ticket_analysis"
 
     def __init__(self):

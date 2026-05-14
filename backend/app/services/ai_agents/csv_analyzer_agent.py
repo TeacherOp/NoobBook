@@ -34,7 +34,7 @@ class CSVAnalyzerAgent:
     """
 
     AGENT_NAME = "csv_analyzer_agent"
-    MAX_ITERATIONS = 20
+    MAX_ITERATIONS = 40
     TERMINATION_TOOL = "return_analysis"
 
     def __init__(self):

@@ -34,10 +34,10 @@ class CSVService:
     Claude analyzes the tool output and generates a concise summary.
     """
 
-    # 10 (was 5) — 5 was too tight when Claude wants to call csv_analyzer
-    # more than once before summarising (e.g. profile then sample). The
-    # cost ceiling is small here since this runs on Haiku.
-    MAX_ITERATIONS = 10
+    # 40 matches the project-wide ceiling. CSV summarisation almost
+    # always finishes in 2-3 rounds on Haiku, but the ceiling is
+    # consistent with every other agent now.
+    MAX_ITERATIONS = 40
     TERMINATION_TOOL = "return_csv_summary"
 
     def __init__(self):

@@ -41,7 +41,7 @@ class WebAgentService:
     """
 
     AGENT_NAME = "web_agent"
-    MAX_ITERATIONS = 8
+    MAX_ITERATIONS = 40
 
     def __init__(self):
         """Initialize agent with lazy-loaded config and tools."""

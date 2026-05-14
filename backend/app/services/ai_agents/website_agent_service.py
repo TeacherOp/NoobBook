@@ -28,7 +28,7 @@ class WebsiteAgentService:
     """Website generation agent - orchestration only."""
 
     AGENT_NAME = "website_agent"
-    MAX_ITERATIONS = 30
+    MAX_ITERATIONS = 40
 
     def __init__(self):
         self._prompt_config = None

@@ -27,7 +27,7 @@ class BusinessReportAgentService:
     """Business report generation agent - orchestration only."""
 
     AGENT_NAME = "business_report_agent"
-    MAX_ITERATIONS = 15
+    MAX_ITERATIONS = 40
 
     def __init__(self):
         self._prompt_config = None

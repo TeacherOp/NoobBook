@@ -6,36 +6,34 @@ and multiple API calls to complete complex tasks. Unlike ai_services
 (single API call), these agents iterate until a termination condition.
 
 Agents:
+All agents share MAX_ITERATIONS = 40 — the project-wide ceiling.
+Most runs finish in well under that, but a single consistent cap
+keeps the safety budget the same across pipelines.
+
 - web_agent_service: Extracts content from URLs using web tools
-  - Uses agentic loop with MAX_ITERATIONS limit
   - Tools: web_fetch, web_search, tavily_search, return_search_result
   - Saves execution logs for debugging
 
 - email_agent_service: Generates HTML email templates
-  - Uses agentic loop with MAX_ITERATIONS limit (15)
   - Tools: plan_email_template, generate_email_image, write_email_code
   - Orchestrates planning → image generation → HTML code writing
 
 - website_agent_service: Generates complete websites (HTML/CSS/JS)
-  - Uses agentic loop with MAX_ITERATIONS limit (30)
   - Tools: plan_website, generate_website_image, read_file, create_file,
     update_file_lines, insert_code, finalize_website
   - Orchestrates planning → image generation → iterative file creation/editing
 
 - presentation_agent_service: Generates PowerPoint presentations
-  - Uses agentic loop with MAX_ITERATIONS limit (40)
   - Tools: plan_presentation, create_base_styles, create_slide, finalize_presentation
   - Orchestrates planning → styling → slide creation → PPTX export
   - Export pipeline: HTML slides → Playwright screenshots → python-pptx
 
 - blog_agent_service: Generates comprehensive blog posts
-  - Uses agentic loop with MAX_ITERATIONS limit (20)
   - Tools: plan_blog_post, generate_blog_image, write_blog_post
   - Orchestrates planning → image generation → markdown writing
   - SEO-optimized content targeting specific keywords
 
 - business_report_agent_service: Generates data-driven business reports
-  - Uses agentic loop with MAX_ITERATIONS limit (25)
   - Tools: plan_business_report, analyze_csv_data, search_source_content, write_business_report
   - Multi-agent orchestration: calls csv_analyzer_agent for data analysis and charts
   - Combines quantitative data analysis with qualitative context

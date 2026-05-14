@@ -27,7 +27,7 @@ class MarketingStrategyAgentService:
     """Marketing strategy generation agent - orchestration only."""
 
     AGENT_NAME = "marketing_strategy_agent"
-    MAX_ITERATIONS = 10
+    MAX_ITERATIONS = 40
 
     def __init__(self):
         self._prompt_config = None

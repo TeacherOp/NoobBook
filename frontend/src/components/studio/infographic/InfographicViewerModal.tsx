@@ -17,7 +17,7 @@ import { Input } from '../../ui/input';
 import { ChartPieSlice, PencilSimple } from '@phosphor-icons/react';
 import type { InfographicJob } from '@/lib/api/studio';
 import { getAuthUrl } from '@/lib/api/client';
-import { ImageLightbox } from '../shared/ImageLightbox';
+import { ImageLightbox, type LightboxImage } from '../shared/ImageLightbox';
 
 interface InfographicViewerModalProps {
   viewingInfographicJob: InfographicJob | null;
@@ -71,15 +71,15 @@ export const InfographicViewerModal: React.FC<InfographicViewerModalProps> = ({
   isGenerating,
   defaultEditInput,
 }) => {
-  const [lightboxOpen, setLightboxOpen] = useState(false);
-  const lightboxImage = viewingInfographicJob?.image_url
-    ? {
-        url: getAuthUrl(viewingInfographicJob.image_url),
-        alt: viewingInfographicJob.topic_title || 'Infographic',
-        filename: viewingInfographicJob.image?.filename,
-        caption: viewingInfographicJob.topic_title || undefined,
-      }
-    : null;
+  // Keep the lightbox state as a single nullable LightboxImage (same
+  // shape as Blog / BusinessReport). Deriving `image` from the parent
+  // prop while keeping `open` as a separate boolean would let the two
+  // diverge: if the parent closes the infographic modal while the
+  // lightbox is up, ImageLightbox silently dismisses (because its open
+  // condition becomes false) without ever firing onClose, leaving the
+  // open flag true — and the next infographic job auto-opens the
+  // lightbox without user input.
+  const [lightboxImage, setLightboxImage] = useState<LightboxImage | null>(null);
 
   return (
    <>
@@ -108,7 +108,12 @@ export const InfographicViewerModal: React.FC<InfographicViewerModalProps> = ({
           <div className="py-4">
             <button
               type="button"
-              onClick={() => setLightboxOpen(true)}
+              onClick={() => setLightboxImage({
+                url: getAuthUrl(viewingInfographicJob.image_url!),
+                alt: viewingInfographicJob.topic_title || 'Infographic',
+                filename: viewingInfographicJob.image?.filename,
+                caption: viewingInfographicJob.topic_title || undefined,
+              })}
               aria-label={`Open full-size view of ${viewingInfographicJob.topic_title || 'infographic'}`}
               className="relative group rounded-lg overflow-hidden border bg-muted cursor-zoom-in transition-shadow hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-amber-500 w-full text-left"
             >
@@ -161,9 +166,9 @@ export const InfographicViewerModal: React.FC<InfographicViewerModalProps> = ({
     </Dialog>
 
     <ImageLightbox
-      open={lightboxOpen}
+      open={lightboxImage !== null}
       image={lightboxImage}
-      onClose={() => setLightboxOpen(false)}
+      onClose={() => setLightboxImage(null)}
     />
    </>
   );

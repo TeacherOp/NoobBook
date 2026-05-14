@@ -146,14 +146,16 @@ class FreshdeskSyncService:
                     logger.error("Transform error for ticket %s: %s", raw_ticket.get("id"), e)
 
                 if len(batch) >= 100:
-                    self._upsert_batch(batch)
-                    stats["tickets_upserted"] += len(batch)
+                    upserted = self._upsert_batch(batch)
+                    stats["tickets_upserted"] += upserted
+                    stats["errors"] += len(batch) - upserted
                     batch = []
 
             # Final batch
             if batch:
-                self._upsert_batch(batch)
-                stats["tickets_upserted"] += len(batch)
+                upserted = self._upsert_batch(batch)
+                stats["tickets_upserted"] += upserted
+                stats["errors"] += len(batch) - upserted
 
             logger.info(
                 "Freshdesk sync complete (source_id=%s): fetched=%d, upserted=%d, errors=%d",
@@ -361,18 +363,92 @@ class FreshdeskSyncService:
             "synced_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    def _upsert_batch(self, tickets: List[Dict[str, Any]]) -> None:
-        """Batch upsert tickets for performance (100 at a time instead of 1-by-1).
-        Uses ticket_id as the unique key since tickets are stored globally."""
+    def _upsert_batch(self, tickets: List[Dict[str, Any]]) -> int:
+        """Batch upsert tickets, returning the count actually written.
+
+        Three robustness measures over the naive single-shot upsert:
+
+        1. ``returning="minimal"`` — PostgREST otherwise ships the full
+           upserted rowset back through Kong. With 100 freshdesk_tickets
+           rows (long ``description_text``, JSONB ``custom_fields``) the
+           response can exceed Kong's upstream buffer / timeout and come
+           back as ``code 502 / "JSON could not be generated"`` — which
+           we saw 2483× in prod. We already have the rows; nothing wants
+           the echoed body.
+
+        2. Halving retry on any non-JWT failure — recovers transient 502s
+           and the rare row that's pathologically large for the chunked
+           response. Walks down to per-row inserts before giving up.
+
+        3. PGRST303 recovery — the singleton supabase client caches the
+           service-role JWT it was built with. On self-hosted Supabase
+           the JWT can carry an ``exp`` claim; once it stales, every
+           call from every service fails with PGRST303 until container
+           restart. Reset the singleton (re-reads SUPABASE_SERVICE_KEY
+           from env) and retry the batch once. If it persists, we log
+           CRITICAL — the key itself needs rotation.
+
+        Returns the count of tickets actually upserted (caller compares
+        against the batch length to know how many were dropped).
+        """
         if not tickets:
-            return
-        try:
-            supabase = get_supabase()
-            supabase.table("freshdesk_tickets").upsert(
-                tickets, on_conflict="ticket_id"
-            ).execute()
-        except Exception as e:
-            logger.error("Batch upsert failed (%d tickets): %s", len(tickets), e)
+            return 0
+
+        # Imported lazily to avoid pulling in the module at import time.
+        from app.services.integrations.supabase.supabase_client import SupabaseClient
+
+        # PGRST303 recovery should fire at most once per top-level batch:
+        # the first time we see it, we reset the client and retry the
+        # whole batch from the top. Persisting after that means the env
+        # key itself is stale — no amount of retrying will help.
+        jwt_recovery_done = False
+
+        def _try(rows: List[Dict[str, Any]]) -> int:
+            nonlocal jwt_recovery_done
+            if not rows:
+                return 0
+            try:
+                get_supabase().table("freshdesk_tickets").upsert(
+                    rows,
+                    on_conflict="ticket_id",
+                    returning="minimal",
+                ).execute()
+                return len(rows)
+            except Exception as exc:
+                err_str = str(exc)
+
+                # PGRST303 → JWT expired on the cached service-role
+                # client. Rebuild and retry the same rows once.
+                if "PGRST303" in err_str and not jwt_recovery_done:
+                    jwt_recovery_done = True
+                    logger.warning(
+                        "Supabase service-role JWT expired (PGRST303); resetting client and retrying batch (%d rows)",
+                        len(rows),
+                    )
+                    SupabaseClient.reset()
+                    return _try(rows)
+
+                # Single row that still failed → drop it, log with
+                # ticket_id so the operator can investigate the
+                # specific record.
+                if len(rows) == 1:
+                    logger.error(
+                        "Upsert dropped freshdesk ticket %s: %s",
+                        rows[0].get("ticket_id"), exc,
+                    )
+                    return 0
+
+                # Halve and retry. Recovers transient upstream 502s and
+                # isolates any individual row that's too large for the
+                # response chunker.
+                mid = len(rows) // 2
+                logger.warning(
+                    "Batch upsert failed (%d rows), halving: %s",
+                    len(rows), exc,
+                )
+                return _try(rows[:mid]) + _try(rows[mid:])
+
+        return _try(tickets)
 
     @staticmethod
     def _compute_hours_between(

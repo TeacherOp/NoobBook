@@ -98,6 +98,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   // batching means functional-updater side effects don't run before the
   // line that reads them, which broke the previous guard pattern.
   const activeChatIdRef = useRef<string | null>(null);
+  // Mirrors `activeChat?.messages?.length`. Read by `recoverChatFromServer`
+  // to detect when the server view is behind local optimistic state — done
+  // via a ref (rather than peeking inside a `setActiveChat` updater) so
+  // the read is genuinely side-effect-free and Strict Mode's double-invoke
+  // of state updaters can't corrupt the snapshot.
+  const activeChatMessageCountRef = useRef(0);
 
   // Sources state for header display
   const [sources, setSources] = useState<Source[]>([]);
@@ -272,12 +278,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   }, [activeChat, onSignalsChange]);
 
-  // Keep the activeChatId ref in sync — read-only mirror used by async
-  // recovery paths so they can compare current chat without racing with
-  // batched state updates.
+  // Keep the activeChatId + message-count refs in sync — read-only mirrors
+  // used by async recovery paths so they can compare current chat without
+  // racing with batched state updates.
   useEffect(() => {
     activeChatIdRef.current = activeChat?.id ?? null;
-  }, [activeChat?.id]);
+    activeChatMessageCountRef.current = activeChat?.messages?.length ?? 0;
+  }, [activeChat?.id, activeChat?.messages?.length]);
 
   /**
    * Load per-chat cost/token breakdown whenever the active chat changes.
@@ -375,20 +382,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
    */
   const recoverChatFromServer = useCallback(
     async (chatId: string, errorToastMessage?: string) => {
-      // Snapshot local message count synchronously via setActiveChat trick.
-      // The recovery can race the backend's `add_assistant_message` commit
-      // — if our fetch wins, the server view has fewer messages than what
-      // we've already shown locally via `appendAssistantMessage`. Retrying
-      // a few times with back-off gives the DB write a moment to land,
-      // and merging (rather than replacing) protects local-only state
-      // either way.
-      let localMessageCount = 0;
-      setActiveChat((prev) => {
-        if (prev && prev.id === chatId) {
-          localMessageCount = prev.messages.length;
-        }
-        return prev;
-      });
+      // Snapshot local message count from the dedicated ref. Reading it
+      // here (rather than peeking inside a `setActiveChat` updater) keeps
+      // the state updater pure — required for Strict Mode's intentional
+      // double-invoke, and just generally idiomatic React.
+      const localMessageCount =
+        activeChatIdRef.current === chatId ? activeChatMessageCountRef.current : 0;
 
       try {
         let chat = await chatsAPI.getChat(projectId, chatId);
@@ -426,10 +425,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         await loadUserUsage();
       } catch (recoveryErr) {
         log.error({ err: recoveryErr, chatId }, 'recovery refetch failed');
-        errorWithLogs(
-          errorToastMessage ||
-            'Connection dropped before the response arrived. Refresh to load it.',
-        );
+        // An explicit empty string from the caller silences the toast —
+        // used by the post-`assistant_done` defence-in-depth refetch,
+        // where the user already received a complete reply and a
+        // "Connection dropped" banner would be a confusing false alarm.
+        // `undefined` (the normal call shape) still gets the default message.
+        if (errorToastMessage !== '') {
+          errorWithLogs(
+            errorToastMessage ||
+              'Connection dropped before the response arrived. Refresh to load it.',
+          );
+        }
       }
     },
     [projectId, onActiveChatChange, onCostsChange, loadUserUsage, errorWithLogs, mergeChatPreservingLocal],
@@ -817,7 +823,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             // check skips the update.
             const recoveryChatId = currentChat.id;
             setTimeout(() => {
-              void recoverChatFromServer(recoveryChatId);
+              // Pass an explicit empty string so a transient failure on
+              // this silent follow-up fetch doesn't surface a misleading
+              // "Connection dropped" toast — the user already saw the
+              // complete reply. recoverChatFromServer treats `""` as
+              // "skip the toast".
+              void recoverChatFromServer(recoveryChatId, '');
             }, 500);
           },
           onErrorEvent: (payload) => {

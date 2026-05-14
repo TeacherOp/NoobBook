@@ -91,7 +91,20 @@ export const BlogViewerModal: React.FC<BlogViewerModalProps> = ({
 
   return (
    <>
-    <Dialog open={viewingBlogJob !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog
+      open={viewingBlogJob !== null}
+      onOpenChange={(open) => {
+        if (!open) {
+          // ImageLightbox is mounted as a sibling fragment outside this
+          // Dialog, so the parent closing doesn't tear it down. Without
+          // explicitly clearing lightboxImage here it stays on screen
+          // (and auto-opens on the next blog job, since the state
+          // outlives the parent prop flip).
+          setLightboxImage(null);
+          onClose();
+        }
+      }}
+    >
       <DialogContent className="sm:max-w-4xl h-[85vh] p-0 flex flex-col">
         <DialogHeader className="px-6 py-4 border-b flex-shrink-0">
           <div className="flex items-center justify-between pr-6">

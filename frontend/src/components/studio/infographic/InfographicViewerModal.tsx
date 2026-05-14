@@ -83,7 +83,19 @@ export const InfographicViewerModal: React.FC<InfographicViewerModalProps> = ({
 
   return (
    <>
-    <Dialog open={viewingInfographicJob !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog
+      open={viewingInfographicJob !== null}
+      onOpenChange={(open) => {
+        if (!open) {
+          // ImageLightbox is mounted as a sibling fragment, so the
+          // parent closing doesn't tear it down on its own. Clear
+          // lightboxImage explicitly so the enlarged view doesn't
+          // outlive the infographic modal it was opened from.
+          setLightboxImage(null);
+          onClose();
+        }
+      }}
+    >
       <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto flex flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

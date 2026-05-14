@@ -98,7 +98,20 @@ export const BusinessReportViewerModal: React.FC<BusinessReportViewerModalProps>
 
   return (
    <>
-    <Dialog open={viewingBusinessReportJob !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog
+      open={viewingBusinessReportJob !== null}
+      onOpenChange={(open) => {
+        if (!open) {
+          // Same sibling-fragment teardown gap as BlogViewerModal:
+          // ImageLightbox is mounted outside this Dialog, so the parent
+          // closing doesn't clear lightboxImage on its own. Explicit
+          // reset prevents the chart lightbox from outliving the report
+          // it was opened from.
+          setLightboxImage(null);
+          onClose();
+        }
+      }}
+    >
       <DialogContent className="sm:max-w-4xl h-[85vh] p-0 flex flex-col">
         <DialogHeader className="px-6 py-4 border-b flex-shrink-0">
           <div className="flex items-center justify-between pr-6">

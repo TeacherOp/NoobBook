@@ -126,6 +126,16 @@ def create_app(config_name='development'):
     # Register error handlers
     register_error_handlers(app)
 
+    # Start the saved-insight scheduler. Daemon thread; one tick every
+    # 5 minutes; refreshes any insight whose cadence interval has
+    # elapsed. Tick failures are swallowed and logged so a transient
+    # Supabase blip can't take the app down.
+    try:
+        from app.services.background_services.insight_scheduler import insight_scheduler
+        insight_scheduler.start()
+    except Exception as exc:
+        app.logger.warning("Failed to start insight scheduler: %s", exc)
+
     # Log successful initialization
     app.logger.info(f"✅ {app.config['APP_NAME']} backend initialized successfully")
 

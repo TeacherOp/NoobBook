@@ -28,6 +28,7 @@ import {
 import { copyToClipboard } from '@/lib/clipboard';
 import { createLogger } from '@/lib/logger';
 import { cn } from '@/lib/utils';
+import { SaveAsInsightButton } from './SaveAsInsightButton';
 
 const log = createLogger('chat-messages');
 
@@ -734,27 +735,36 @@ export const ChatMessages: React.FC<ChatMessagesProps> = React.memo(({
       className="absolute inset-0 overflow-y-auto overflow-x-hidden"
     >
       <div className="pt-6 pb-2 px-6 space-y-4 w-full">
-        {messages.filter((msg) => msg && msg.id).map((msg) => (
-          <div key={msg.id}>
-            {msg.role === 'user' ? (
-              <UserMessage content={msg.content} />
-            ) : (
-              // AI messages don't carry image blocks today; coerce to
-              // string so the markdown renderer's prop type stays simple.
-              <AIMessage
-                content={messageContentAsText(msg.content)}
-                projectId={projectId}
-                studioAssetRewriter={studioAssetRewriter}
-              />
-            )}
-            <MessageTimestamp raw={msg.timestamp} align={msg.role === 'user' ? 'right' : 'left'} />
-            {msg.error && (
-              <p className="text-xs text-destructive text-center mt-1">
-                This message had an error
-              </p>
-            )}
-          </div>
-        ))}
+        {messages.filter((msg) => msg && msg.id).map((msg) => {
+          const isUser = msg.role === 'user';
+          const userPromptText = isUser ? messageContentAsText(msg.content) : '';
+          return (
+            <div key={msg.id}>
+              {isUser ? (
+                <UserMessage content={msg.content} />
+              ) : (
+                // AI messages don't carry image blocks today; coerce to
+                // string so the markdown renderer's prop type stays simple.
+                <AIMessage
+                  content={messageContentAsText(msg.content)}
+                  projectId={projectId}
+                  studioAssetRewriter={studioAssetRewriter}
+                />
+              )}
+              {isUser && userPromptText && (
+                <div className="flex justify-end mt-1">
+                  <SaveAsInsightButton projectId={projectId} prompt={userPromptText} />
+                </div>
+              )}
+              <MessageTimestamp raw={msg.timestamp} align={isUser ? 'right' : 'left'} />
+              {msg.error && (
+                <p className="text-xs text-destructive text-center mt-1">
+                  This message had an error
+                </p>
+              )}
+            </div>
+          );
+        })}
 
         {streamingAssistantContent && (
           <AIMessage

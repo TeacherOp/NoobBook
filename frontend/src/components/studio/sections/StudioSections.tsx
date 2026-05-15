@@ -26,10 +26,14 @@ import { PRDSection } from './PRDSection';
 import { MarketingStrategySection } from './MarketingStrategySection';
 import { BlogSection } from './BlogSection';
 import { BusinessReportSection } from './BusinessReportSection';
+import { SavedInsightsSection } from './SavedInsightsSection';
 
 export const StudioSections: React.FC = () => {
   return (
     <>
+      {/* Auto-refreshing saved chat prompts — shows only when present */}
+      <SavedInsightsSection />
+
       {/* Learning Sections */}
       <AudioSection />
       <QuizSection />

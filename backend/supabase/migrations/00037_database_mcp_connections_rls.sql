@@ -46,10 +46,18 @@
 -- RLS on the inner query). Used only by the join-table policies; the
 -- parent-table policies can keep their plain EXISTS clauses because the
 -- inner reference now resolves without re-entering the parent's policy.
+--
+-- These helpers intentionally take NO user_id parameter and resolve
+-- the caller's identity via `auth.uid()` inside. Reason: the function
+-- is reachable as a PostgREST RPC endpoint (auth role needs EXECUTE
+-- for policy expressions to call it). If we accepted `p_user_id` as a
+-- parameter, any authenticated caller could iterate the (connection_id,
+-- user_id) space against the RPC and map out cross-tenant ownership.
+-- Anchoring to `auth.uid()` means the function only ever answers
+-- "do I own connection X?" — information the caller already has.
 
 CREATE OR REPLACE FUNCTION user_owns_database_connection(
-  p_connection_id UUID,
-  p_user_id UUID
+  p_connection_id UUID
 ) RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
@@ -58,17 +66,16 @@ SET search_path = public, pg_catalog
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM database_connections
-    WHERE id = p_connection_id AND owner_user_id = p_user_id
+    WHERE id = p_connection_id AND owner_user_id = auth.uid()
   );
 $$;
 
-REVOKE EXECUTE ON FUNCTION user_owns_database_connection(UUID, UUID) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION user_owns_database_connection(UUID, UUID)
+REVOKE EXECUTE ON FUNCTION user_owns_database_connection(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION user_owns_database_connection(UUID)
   TO authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION user_owns_mcp_connection(
-  p_connection_id UUID,
-  p_user_id UUID
+  p_connection_id UUID
 ) RETURNS BOOLEAN
 LANGUAGE sql
 STABLE
@@ -77,12 +84,12 @@ SET search_path = public, pg_catalog
 AS $$
   SELECT EXISTS (
     SELECT 1 FROM mcp_connections
-    WHERE id = p_connection_id AND owner_user_id = p_user_id
+    WHERE id = p_connection_id AND owner_user_id = auth.uid()
   );
 $$;
 
-REVOKE EXECUTE ON FUNCTION user_owns_mcp_connection(UUID, UUID) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION user_owns_mcp_connection(UUID, UUID)
+REVOKE EXECUTE ON FUNCTION user_owns_mcp_connection(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION user_owns_mcp_connection(UUID)
   TO authenticated, service_role;
 
 -- =============================================================================
@@ -154,7 +161,7 @@ ON database_connection_users FOR SELECT
 TO authenticated
 USING (
   user_id = auth.uid()
-  OR user_owns_database_connection(connection_id, auth.uid())
+  OR user_owns_database_connection(connection_id)
 );
 
 -- Writes: only the parent connection's owner can grant / revoke members.
@@ -162,13 +169,13 @@ DROP POLICY IF EXISTS database_connection_users_insert ON database_connection_us
 CREATE POLICY database_connection_users_insert
 ON database_connection_users FOR INSERT
 TO authenticated
-WITH CHECK (user_owns_database_connection(connection_id, auth.uid()));
+WITH CHECK (user_owns_database_connection(connection_id));
 
 DROP POLICY IF EXISTS database_connection_users_delete ON database_connection_users;
 CREATE POLICY database_connection_users_delete
 ON database_connection_users FOR DELETE
 TO authenticated
-USING (user_owns_database_connection(connection_id, auth.uid()));
+USING (user_owns_database_connection(connection_id));
 
 -- =============================================================================
 -- 4. mcp_connections RLS — same shape as database_connections
@@ -221,17 +228,17 @@ ON mcp_connection_users FOR SELECT
 TO authenticated
 USING (
   user_id = auth.uid()
-  OR user_owns_mcp_connection(connection_id, auth.uid())
+  OR user_owns_mcp_connection(connection_id)
 );
 
 DROP POLICY IF EXISTS mcp_connection_users_insert ON mcp_connection_users;
 CREATE POLICY mcp_connection_users_insert
 ON mcp_connection_users FOR INSERT
 TO authenticated
-WITH CHECK (user_owns_mcp_connection(connection_id, auth.uid()));
+WITH CHECK (user_owns_mcp_connection(connection_id));
 
 DROP POLICY IF EXISTS mcp_connection_users_delete ON mcp_connection_users;
 CREATE POLICY mcp_connection_users_delete
 ON mcp_connection_users FOR DELETE
 TO authenticated
-USING (user_owns_mcp_connection(connection_id, auth.uid()));
+USING (user_owns_mcp_connection(connection_id));

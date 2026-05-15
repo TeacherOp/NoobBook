@@ -127,8 +127,14 @@ class TestBuildApiParamsCaching:
         # No tools key when tools is falsy, but system should still cache.
         assert "tools" not in params
         assert params["system"][0]["cache_control"] == {"type": "ephemeral"}
+        # Top-level messages-array breakpoint must still be set — it's
+        # independent of whether tools are present.
+        assert params["cache_control"] == {"type": "ephemeral"}
 
     def test_caching_on_with_no_system_does_not_crash(self):
         params = self._build(enable_prompt_cache=True, system_prompt=None)
         assert "system" not in params
         assert params["tools"][-1]["cache_control"] == {"type": "ephemeral"}
+        # Top-level messages-array breakpoint must still be set — it's
+        # independent of whether a system prompt is present.
+        assert params["cache_control"] == {"type": "ephemeral"}

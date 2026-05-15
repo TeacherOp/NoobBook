@@ -29,6 +29,63 @@
 --     parameterised whitelist of query shapes.
 
 -- =============================================================================
+-- 0. SECURITY DEFINER helpers — break the RLS cycle
+-- =============================================================================
+--
+-- The connection-credential policies below have to reference each other:
+-- `*_connections_select` needs to allow members in via `*_connection_users`,
+-- and `*_connection_users_select` needs to allow the owner of the parent
+-- connection to see member rows. If both sides use `EXISTS` directly,
+-- PostgreSQL's policy expansion enters an infinite cycle and raises
+-- `ERROR: infinite recursion detected in policy for relation ...` on
+-- every authenticated query — turning the policy into a no-op that
+-- errors instead of filters.
+--
+-- The fix is one SECURITY DEFINER helper per parent table that checks
+-- ownership while running as the function owner (and therefore bypasses
+-- RLS on the inner query). Used only by the join-table policies; the
+-- parent-table policies can keep their plain EXISTS clauses because the
+-- inner reference now resolves without re-entering the parent's policy.
+
+CREATE OR REPLACE FUNCTION user_owns_database_connection(
+  p_connection_id UUID,
+  p_user_id UUID
+) RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM database_connections
+    WHERE id = p_connection_id AND owner_user_id = p_user_id
+  );
+$$;
+
+REVOKE EXECUTE ON FUNCTION user_owns_database_connection(UUID, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION user_owns_database_connection(UUID, UUID)
+  TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION user_owns_mcp_connection(
+  p_connection_id UUID,
+  p_user_id UUID
+) RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM mcp_connections
+    WHERE id = p_connection_id AND owner_user_id = p_user_id
+  );
+$$;
+
+REVOKE EXECUTE ON FUNCTION user_owns_mcp_connection(UUID, UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION user_owns_mcp_connection(UUID, UUID)
+  TO authenticated, service_role;
+
+-- =============================================================================
 -- 1. exec_freshdesk_query — revoke the dangerous authenticated grant
 -- =============================================================================
 
@@ -97,11 +154,7 @@ ON database_connection_users FOR SELECT
 TO authenticated
 USING (
   user_id = auth.uid()
-  OR EXISTS (
-    SELECT 1 FROM database_connections dc
-    WHERE dc.id = database_connection_users.connection_id
-      AND dc.owner_user_id = auth.uid()
-  )
+  OR user_owns_database_connection(connection_id, auth.uid())
 );
 
 -- Writes: only the parent connection's owner can grant / revoke members.
@@ -109,25 +162,13 @@ DROP POLICY IF EXISTS database_connection_users_insert ON database_connection_us
 CREATE POLICY database_connection_users_insert
 ON database_connection_users FOR INSERT
 TO authenticated
-WITH CHECK (
-  EXISTS (
-    SELECT 1 FROM database_connections dc
-    WHERE dc.id = database_connection_users.connection_id
-      AND dc.owner_user_id = auth.uid()
-  )
-);
+WITH CHECK (user_owns_database_connection(connection_id, auth.uid()));
 
 DROP POLICY IF EXISTS database_connection_users_delete ON database_connection_users;
 CREATE POLICY database_connection_users_delete
 ON database_connection_users FOR DELETE
 TO authenticated
-USING (
-  EXISTS (
-    SELECT 1 FROM database_connections dc
-    WHERE dc.id = database_connection_users.connection_id
-      AND dc.owner_user_id = auth.uid()
-  )
-);
+USING (user_owns_database_connection(connection_id, auth.uid()));
 
 -- =============================================================================
 -- 4. mcp_connections RLS — same shape as database_connections
@@ -180,33 +221,17 @@ ON mcp_connection_users FOR SELECT
 TO authenticated
 USING (
   user_id = auth.uid()
-  OR EXISTS (
-    SELECT 1 FROM mcp_connections mc
-    WHERE mc.id = mcp_connection_users.connection_id
-      AND mc.owner_user_id = auth.uid()
-  )
+  OR user_owns_mcp_connection(connection_id, auth.uid())
 );
 
 DROP POLICY IF EXISTS mcp_connection_users_insert ON mcp_connection_users;
 CREATE POLICY mcp_connection_users_insert
 ON mcp_connection_users FOR INSERT
 TO authenticated
-WITH CHECK (
-  EXISTS (
-    SELECT 1 FROM mcp_connections mc
-    WHERE mc.id = mcp_connection_users.connection_id
-      AND mc.owner_user_id = auth.uid()
-  )
-);
+WITH CHECK (user_owns_mcp_connection(connection_id, auth.uid()));
 
 DROP POLICY IF EXISTS mcp_connection_users_delete ON mcp_connection_users;
 CREATE POLICY mcp_connection_users_delete
 ON mcp_connection_users FOR DELETE
 TO authenticated
-USING (
-  EXISTS (
-    SELECT 1 FROM mcp_connections mc
-    WHERE mc.id = mcp_connection_users.connection_id
-      AND mc.owner_user_id = auth.uid()
-  )
-);
+USING (user_owns_mcp_connection(connection_id, auth.uid()));

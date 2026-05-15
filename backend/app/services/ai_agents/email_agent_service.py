@@ -257,7 +257,8 @@ class EmailAgentService:
                 temperature=config["temperature"],
                 tools=tools["all_tools"] if isinstance(tools, dict) else tools,
                 tool_choice={"type": "any"},
-                project_id=project_id
+                project_id=project_id,
+                enable_prompt_cache=True,
             )
 
             total_input_tokens += response["usage"]["input_tokens"]

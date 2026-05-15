@@ -140,6 +140,7 @@ class DatabaseAnalyzerAgent:
                     tags=["query"],
                     chat_id=chat_id,
                     user_id=user_id,
+                    enable_prompt_cache=True,
                 )
 
                 total_input_tokens += response["usage"]["input_tokens"]

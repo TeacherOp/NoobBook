@@ -466,6 +466,18 @@ class ClaudeService:
         if tool_choice:
             api_params["tool_choice"] = tool_choice
 
+        # Automatic prompt caching for the messages array. Setting
+        # `cache_control` at the top level tells Anthropic to place a cache
+        # breakpoint on the last cacheable block of `messages` and slide
+        # that breakpoint forward as the conversation/loop grows — so each
+        # turn after the first reads the prior turns from cache instead of
+        # paying full input price. Stacks with the explicit breakpoints on
+        # `system` and the last tool above; budget goes 2-of-4 → 3-of-4.
+        # 5-min TTL (default ephemeral) is enough for chat sessions and
+        # in-flight agentic loops; 1h would double write cost for no win.
+        if enable_prompt_cache:
+            api_params["cache_control"] = {"type": "ephemeral"}
+
         # Add extra headers for beta features (e.g., web_fetch)
         if extra_headers:
             api_params["extra_headers"] = extra_headers

@@ -123,7 +123,8 @@ class WebAgentService:
                 tools=all_tools,
                 tool_choice={"type": "any"},
                 extra_headers=extra_headers,
-                project_id=project_id
+                project_id=project_id,
+                enable_prompt_cache=True,
             )
 
             # Track token usage

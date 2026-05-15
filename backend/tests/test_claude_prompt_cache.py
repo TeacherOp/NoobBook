@@ -103,6 +103,13 @@ class TestBuildApiParamsCaching:
         params = self._build(enable_prompt_cache=False)
         assert params["system"] == "you are NoobBook"
         assert "cache_control" not in params["tools"][-1]
+        assert "cache_control" not in params
+
+    def test_caching_on_sets_top_level_cache_control(self):
+        """Top-level cache_control opts into Anthropic's automatic messages-array
+        breakpoint that slides forward as the conversation grows."""
+        params = self._build(enable_prompt_cache=True)
+        assert params["cache_control"] == {"type": "ephemeral"}
 
     def test_caching_on_wraps_system(self):
         params = self._build(enable_prompt_cache=True)

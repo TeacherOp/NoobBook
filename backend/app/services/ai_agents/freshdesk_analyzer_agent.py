@@ -162,6 +162,7 @@ class FreshdeskAnalyzerAgent:
                     tags=["query"],
                     chat_id=chat_id,
                     user_id=user_id,
+                    enable_prompt_cache=True,
                 )
 
                 # Track usage

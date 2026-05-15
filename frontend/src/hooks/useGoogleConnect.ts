@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { googleDriveAPI } from '@/lib/api/settings';
+import { API_HOST } from '@/lib/api/client';
 import { useIntegrations } from '@/contexts/IntegrationsContext';
 import { useToast } from '@/components/ui/use-toast';
 import { createLogger } from '@/lib/logger';
@@ -9,6 +10,26 @@ const log = createLogger('use-google-connect');
 const POLL_INTERVAL_MS = 2000;
 const POLL_TIMEOUT_MS = 120_000;
 const POST_MESSAGE_TYPE = 'noobbook:google-auth';
+
+/**
+ * Origins we accept postMessage events from. The callback page is served
+ * by the backend at `<API_HOST>/api/v1/google/callback`, so its
+ * `event.origin` is the backend's origin. In prod/Docker the frontend
+ * and backend share an origin (API_HOST is empty / same-origin); in
+ * local dev the backend is at :5001 while the frontend is at :5173, so
+ * we explicitly allow the API host too.
+ */
+const buildAllowedOrigins = (): Set<string> => {
+  const origins = new Set<string>([window.location.origin]);
+  if (API_HOST) {
+    try {
+      origins.add(new URL(API_HOST, window.location.origin).origin);
+    } catch {
+      // API_HOST is malformed — ignore; same-origin still works.
+    }
+  }
+  return origins;
+};
 
 interface GoogleAuthMessage {
   type: typeof POST_MESSAGE_TYPE;
@@ -39,6 +60,13 @@ export function useGoogleConnect() {
   // We register the postMessage listener once per connect attempt so a
   // stale listener from a previous attempt can't fire against new state.
   const messageHandlerRef = useRef<((event: MessageEvent) => void) | null>(null);
+  // Guards against concurrent finalize calls — e.g. when two overlapping
+  // status polls both observe `connected=true` before the first one's
+  // cleanup() takes effect. Without this the user would see two
+  // "Connected as …" toasts back-to-back.
+  const finalizingRef = useRef(false);
+
+  const allowedOrigins = useMemo(() => buildAllowedOrigins(), []);
 
   const cleanup = useCallback(() => {
     if (pollRef.current) {
@@ -58,6 +86,8 @@ export function useGoogleConnect() {
   useEffect(() => () => cleanup(), [cleanup]);
 
   const finalizeSuccess = useCallback(async () => {
+    if (finalizingRef.current) return;
+    finalizingRef.current = true;
     cleanup();
     try {
       // Re-fetch from the backend rather than trusting the popup's payload —
@@ -83,6 +113,7 @@ export function useGoogleConnect() {
 
   const connect = useCallback(async () => {
     setIsConnecting(true);
+    finalizingRef.current = false;
     try {
       const authUrl = await googleDriveAPI.getAuthUrl();
       if (!authUrl) {
@@ -97,7 +128,12 @@ export function useGoogleConnect() {
       cleanup();
 
       // Fast path: the callback page posts back to us before self-closing.
+      // Any same-window page that holds a reference to us could spoof this
+      // event, so we gate on `event.origin` matching the backend that we
+      // know served the callback HTML. The allowlist is derived from
+      // API_HOST + same-origin, computed once per hook instance.
       const handler = (event: MessageEvent) => {
+        if (!allowedOrigins.has(event.origin)) return;
         const data = event.data as Partial<GoogleAuthMessage> | undefined;
         if (!data || data.type !== POST_MESSAGE_TYPE) return;
         if (data.status === 'success') {
@@ -135,7 +171,7 @@ export function useGoogleConnect() {
       error('Failed to connect Google Drive');
       setIsConnecting(false);
     }
-  }, [cleanup, error, finalizeSuccess, info]);
+  }, [allowedOrigins, cleanup, error, finalizeSuccess, info]);
 
   return { connect, isConnecting };
 }

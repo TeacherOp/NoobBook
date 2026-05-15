@@ -62,6 +62,13 @@ def authenticate_request():
     if request.path.startswith('/api/v1/share/'):
         return None
 
+    # Google's OAuth redirect lands here as a top-level browser GET with
+    # no Authorization header (Google initiates it, the browser just
+    # follows). The user is identified by the `state` query parameter
+    # set when we minted the auth URL.
+    if request.path == '/api/v1/google/callback':
+        return None
+
     user_id = validate_token()
 
     if not user_id:

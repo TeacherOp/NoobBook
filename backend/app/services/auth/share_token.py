@@ -94,10 +94,13 @@ def require_share_token(*, require_jwt: bool = False) -> Callable:
                 )
 
             # Resolve the caller's identity. For public mode this can be
-            # anonymous; for invited mode we need a JWT.
+            # anonymous; for invited mode we need a JWT with a verified
+            # mailbox (or a user_id already in the invitee list — see
+            # share_service.viewer_invited for the resolution order).
             identity = get_request_identity()
             viewer_user_id = identity.user_id if identity.is_authenticated else None
             viewer_email = identity.email if identity.is_authenticated else None
+            viewer_email_verified = identity.email_verified if identity.is_authenticated else False
 
             if row.get("mode") == "invited":
                 if not identity.is_authenticated:
@@ -109,7 +112,12 @@ def require_share_token(*, require_jwt: bool = False) -> Callable:
                         },
                         401,
                     )
-                if not share_service.email_invited(row, viewer_email):
+                if not share_service.viewer_invited(
+                    row,
+                    viewer_user_id=viewer_user_id,
+                    viewer_email=viewer_email,
+                    email_verified=viewer_email_verified,
+                ):
                     return _error(
                         {
                             "success": False,

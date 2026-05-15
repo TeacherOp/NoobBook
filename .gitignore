@@ -97,3 +97,4 @@ docker/supabase/volumes/minio/
 
 # Supabase CLI temp files
 backend/supabase/.temp/
+SECURITY_FOLLOWUPS.md

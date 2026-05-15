@@ -209,8 +209,27 @@ fi
 
 # Create NoobBook .env if it doesn't exist
 if [ ! -f "$NOOBBOOK_ENV" ]; then
+    # Bootstrap-admin precondition (fresh-deploy only).
+    # Refusing to proceed without explicit operator intent here closes
+    # the "first signup wins admin" race. If you're running this on a
+    # box where you've already pre-seeded an admin user some other way,
+    # just put the same email/password in the shell env and the same
+    # values land in the .env on this run.
+    if [ -z "${NOOBBOOK_BOOTSTRAP_ADMIN_EMAIL:-}" ] || [ -z "${NOOBBOOK_BOOTSTRAP_ADMIN_PASSWORD:-}" ]; then
+        error "Fresh deploy detected (no docker/.env yet). Set NOOBBOOK_BOOTSTRAP_ADMIN_EMAIL and NOOBBOOK_BOOTSTRAP_ADMIN_PASSWORD in your shell env before running setup.sh. Example:
+  export NOOBBOOK_BOOTSTRAP_ADMIN_EMAIL='you@example.com'
+  export NOOBBOOK_BOOTSTRAP_ADMIN_PASSWORD='\$(openssl rand -base64 24)'
+  bash docker/setup.sh"
+    fi
+
     info "Creating NoobBook .env from template..."
     cp "$SCRIPT_DIR/.env.example" "$NOOBBOOK_ENV"
+
+    # Persist the bootstrap admin into the .env so subsequent
+    # container restarts can call bootstrap_admin_from_env() without
+    # depending on the operator's shell.
+    replace_env_var "$NOOBBOOK_ENV" "NOOBBOOK_BOOTSTRAP_ADMIN_EMAIL" "$NOOBBOOK_BOOTSTRAP_ADMIN_EMAIL"
+    replace_env_var "$NOOBBOOK_ENV" "NOOBBOOK_BOOTSTRAP_ADMIN_PASSWORD" "$NOOBBOOK_BOOTSTRAP_ADMIN_PASSWORD"
 
     # Source Supabase env to get generated keys
     # shellcheck disable=SC1090

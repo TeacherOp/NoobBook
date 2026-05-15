@@ -316,27 +316,26 @@ class AuthService:
 
         Rules:
         1) If email is in NOOBBOOK_ADMIN_EMAILS -> admin
-        2) If no admins exist yet -> admin (bootstrap)
+        2) If email matches NOOBBOOK_BOOTSTRAP_ADMIN_EMAIL -> admin
+           (covers the very first deploy when no admin exists yet)
         3) Else -> user
+
+        The previous "if no admins exist, auto-promote the first signup
+        to admin" branch was removed. That branch let whoever found the
+        deploy URL first claim admin without any operator intent —
+        operators now bootstrap explicitly via the env var path
+        (`bootstrap_admin_from_env()` or NOOBBOOK_ADMIN_EMAILS).
         """
+        normalized = email.strip().lower()
+
         admin_emails = os.getenv("NOOBBOOK_ADMIN_EMAILS", "")
         admin_list = [e.strip().lower() for e in admin_emails.split(",") if e.strip()]
-        if email.strip().lower() in admin_list:
+        if normalized in admin_list:
             return "admin"
 
-        try:
-            resp = (
-                self.supabase.table("users")
-                .select("id")
-                .eq("role", "admin")
-                .limit(1)
-                .execute()
-            )
-            if not resp.data:
-                return "admin"
-        except Exception:
-            # If check fails, default to user
-            pass
+        bootstrap_email = (os.getenv("NOOBBOOK_BOOTSTRAP_ADMIN_EMAIL") or "").strip().lower()
+        if bootstrap_email and normalized == bootstrap_email:
+            return "admin"
 
         return "user"
 

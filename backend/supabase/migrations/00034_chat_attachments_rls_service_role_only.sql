@@ -51,7 +51,11 @@ BEGIN
       qual LIKE '%chat-attachments%'
       OR with_check LIKE '%chat-attachments%'
     )
-    AND 'authenticated' = ANY(roles);
+    -- 'authenticated' = ANY(...) misses the case where roles is the empty
+    -- array '{}', which in pg_policies stands for PUBLIC (no TO clause).
+    -- A stray PUBLIC-scoped policy applies to every role including
+    -- authenticated, so we have to flag those too.
+    AND ('authenticated' = ANY(roles) OR cardinality(roles) = 0);
 
   IF overlap_count > 0 THEN
     RAISE EXCEPTION

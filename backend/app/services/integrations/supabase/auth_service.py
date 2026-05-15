@@ -317,7 +317,9 @@ class AuthService:
         Rules:
         1) If email is in NOOBBOOK_ADMIN_EMAILS -> admin
         2) If email matches NOOBBOOK_BOOTSTRAP_ADMIN_EMAIL -> admin
-           (covers the very first deploy when no admin exists yet)
+           (persisted permanently in docker/.env by setup.sh; behaves
+           like an implicit entry in NOOBBOOK_ADMIN_EMAILS for all
+           future signups with that address, not only the first deploy)
         3) Else -> user
 
         The previous "if no admins exist, auto-promote the first signup

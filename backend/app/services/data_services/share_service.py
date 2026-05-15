@@ -242,18 +242,27 @@ def viewer_invited(
     if not matched_email:
         return False
 
-    # Promote: remove the matched email, add the user_id. Best-effort
-    # update; if it fails (network/RLS), we still grant access for
-    # this request — the next request retries the promotion. We never
+    # Promote: remove the matched email, add the user_id. Atomic
+    # server-side via the `promote_share_invitee` RPC (migration 00036)
+    # — using array_remove / array_append on the live row, not a
+    # Python-side read-modify-write. This is what prevents two
+    # concurrent invitees from clobbering each other's promotion and
+    # leaving one of them stranded outside both arrays.
+    #
+    # Best-effort: if the RPC call fails (network blip / RLS / migration
+    # not yet applied) we still grant access for THIS request. The next
+    # request from the same invitee will retry the promotion. We never
     # cache a failed promotion in memory so retries stay correct.
     try:
         client = _client()
-        next_emails = [e for e in invited_emails if e and e.lower() != normalized]
-        next_user_ids = list(invited_user_ids) + [viewer_user_id]
-        client.table("project_shares").update({
-            "invited_emails": next_emails,
-            "invited_user_ids": next_user_ids,
-        }).eq("id", row["id"]).execute()
+        client.rpc(
+            "promote_share_invitee",
+            {
+                "p_share_id": row["id"],
+                "p_email": matched_email,
+                "p_user_id": viewer_user_id,
+            },
+        ).execute()
     except Exception as e:
         logger.warning(
             "viewer_invited: failed to promote invitee email→user_id for share %s: %s",

@@ -12,7 +12,22 @@ from flask import current_app, jsonify, request
 
 from app.api.insights import insights_bp
 from app.services.auth.rbac import get_request_identity
+from app.services.data_services import project_service
 from app.services.data_services.insight_service import insight_service
+
+
+def _project_access_or_404(project_id: str, user_id: str):
+    """Enforce project membership before any insight mutation.
+
+    The backend uses the Supabase service-role JWT for all writes, which
+    bypasses RLS — so the project-ownership gate must live in Python,
+    not in the database policy. Without this an authenticated user who
+    knows a foreign project UUID could attach a scheduler-driven chat
+    to it.
+    """
+    if not project_service.has_project_access(project_id, user_id):
+        return jsonify({"success": False, "error": "Project not found"}), 404
+    return None
 
 
 # Reused worker pool for manual refreshes — keeps the response endpoint
@@ -30,6 +45,9 @@ def list_insights(project_id: str):
     user_id = _current_user_id()
     if not user_id:
         return jsonify({"success": False, "error": "Authentication required"}), 401
+    err = _project_access_or_404(project_id, user_id)
+    if err is not None:
+        return err
     try:
         rows = insight_service.list_insights(project_id, user_id)
         return jsonify({"success": True, "insights": rows}), 200
@@ -43,6 +61,9 @@ def create_insight(project_id: str):
     user_id = _current_user_id()
     if not user_id:
         return jsonify({"success": False, "error": "Authentication required"}), 401
+    err = _project_access_or_404(project_id, user_id)
+    if err is not None:
+        return err
     data = request.get_json() or {}
     prompt = (data.get("prompt") or "").strip()
     cadence = (data.get("cadence") or "weekly").strip()
@@ -69,12 +90,12 @@ def create_insight(project_id: str):
     "/projects/<project_id>/insights/<insight_id>", methods=["DELETE"]
 )
 def delete_insight(project_id: str, insight_id: str):
-    # project_id is accepted in the path for route symmetry but the
-    # ownership check on owner_user_id is what actually authorises.
-    _ = project_id
     user_id = _current_user_id()
     if not user_id:
         return jsonify({"success": False, "error": "Authentication required"}), 401
+    err = _project_access_or_404(project_id, user_id)
+    if err is not None:
+        return err
     deleted = insight_service.delete_insight(insight_id, user_id)
     if not deleted:
         return jsonify({"success": False, "error": "Not found"}), 404
@@ -85,13 +106,19 @@ def delete_insight(project_id: str, insight_id: str):
     "/projects/<project_id>/insights/<insight_id>/refresh", methods=["POST"]
 )
 def refresh_insight(project_id: str, insight_id: str):
-    _ = project_id
     user_id = _current_user_id()
     if not user_id:
         return jsonify({"success": False, "error": "Authentication required"}), 401
+    err = _project_access_or_404(project_id, user_id)
+    if err is not None:
+        return err
 
     insight = insight_service.get_insight(insight_id)
-    if not insight or insight.get("owner_user_id") != user_id:
+    if (
+        not insight
+        or insight.get("owner_user_id") != user_id
+        or insight.get("project_id") != project_id
+    ):
         return jsonify({"success": False, "error": "Not found"}), 404
 
     # Claim before submitting so we can return a clean 409 if a scheduler

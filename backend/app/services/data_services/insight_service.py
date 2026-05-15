@@ -111,6 +111,13 @@ class InsightService:
         rows = response.data or []
         due: List[Dict[str, Any]] = []
         for row in rows:
+            # Check the cap first so the limit is enforced uniformly across
+            # every path that might append (null last_run_at, parse error,
+            # interval elapsed). A fresh deployment with hundreds of unrun
+            # insights would otherwise blow past `limit` and saturate the
+            # scheduler's thread pool.
+            if len(due) >= limit:
+                break
             interval = CADENCE_INTERVALS.get(row.get("cadence"))
             if interval is None:
                 continue
@@ -125,8 +132,6 @@ class InsightService:
                 continue
             if now - last_dt >= interval:
                 due.append(row)
-            if len(due) >= limit:
-                break
         return due
 
     def claim_for_refresh(self, insight_id: str) -> bool:
@@ -181,15 +186,26 @@ class InsightService:
         *,
         result_text: Optional[str],
         chat_id: Optional[str],
-        error_text: Optional[str],
     ) -> None:
+        """Stamp a successful refresh result and clear the running flag."""
         self.supabase.table(self.TABLE).update(
             {
                 "is_running": False,
                 "last_run_at": datetime.now(timezone.utc).isoformat(),
                 "last_result": result_text,
                 "last_chat_id": chat_id,
-                "last_error": error_text,
+                "last_error": None,
+            }
+        ).eq("id", insight_id).execute()
+
+    def release_with_error(self, insight_id: str, *, error_text: str) -> None:
+        """Clear the running flag after a failed refresh, leaving last_run_at
+        untouched so the next scheduler tick retries immediately instead of
+        postponing by a full cadence interval."""
+        self.supabase.table(self.TABLE).update(
+            {
+                "is_running": False,
+                "last_error": error_text[:500],
             }
         ).eq("id", insight_id).execute()
 
@@ -198,28 +214,35 @@ class InsightService:
     def refresh_insight(self, insight_id: str) -> Dict[str, Any]:
         """Re-run the saved prompt as a fresh chat and store the result.
 
-        Caller is expected to have already claimed the row (or be calling
-        for a manual refresh from the UI, which races nothing). Either way
-        we set/clear `is_running` defensively here so a manual refresh
-        also blocks the scheduler from racing it.
+        Caller may have already claimed the row (scheduler path) or not
+        (manual /refresh route). Either way the entire body runs under a
+        single try/except so a transient Supabase error before send_message
+        — or any other unexpected failure — can never leave `is_running=true`
+        permanently. On failure we keep `last_run_at` untouched so the next
+        scheduler tick retries on the very next cycle instead of waiting a
+        full cadence interval.
         """
         # Local imports to avoid a circular import at module load:
         # chat_service / main_chat_service both pull data_services in.
         from app.services.data_services import chat_service
         from app.services.chat_services.main_chat_service import main_chat_service
 
-        # Defensive claim — no-op if already claimed by caller.
-        self.claim_for_refresh(insight_id)
-
-        insight = self.get_insight(insight_id)
-        if not insight:
-            return {"success": False, "error": "Insight not found"}
-
-        project_id = insight["project_id"]
-        prompt = insight["prompt"]
         chat_id: Optional[str] = None
-
         try:
+            # Defensive claim — no-op if already claimed by caller.
+            self.claim_for_refresh(insight_id)
+
+            insight = self.get_insight(insight_id)
+            if not insight:
+                # Released via the error helper so the caller still gets a
+                # consistent {success: False, ...} response; if the row is
+                # genuinely missing the UPDATE is just a no-op.
+                self.release_with_error(insight_id, error_text="Insight not found")
+                return {"success": False, "error": "Insight not found"}
+
+            project_id = insight["project_id"]
+            prompt = insight["prompt"]
+
             # Fresh chat per refresh keeps the runs auditable and avoids
             # any context carry-over from previous turns.
             chat = chat_service.create_chat(
@@ -239,18 +262,22 @@ class InsightService:
                 insight_id,
                 result_text=assistant_text,
                 chat_id=chat_id,
-                error_text=None,
             )
             return {"success": True, "result": assistant_text, "chat_id": chat_id}
 
         except Exception as exc:
             logger.exception("Failed to refresh insight %s: %s", insight_id, exc)
-            self.release_with_result(
-                insight_id,
-                result_text=None,
-                chat_id=chat_id,
-                error_text=str(exc)[:500],
-            )
+            try:
+                self.release_with_error(insight_id, error_text=str(exc))
+            except Exception as release_exc:
+                # If even the cleanup write fails the row stays claimed; the
+                # startup reaper will eventually unstick it. Log loudly so
+                # we notice in metrics.
+                logger.exception(
+                    "Failed to release insight %s after error: %s",
+                    insight_id,
+                    release_exc,
+                )
             return {"success": False, "error": str(exc)}
 
 

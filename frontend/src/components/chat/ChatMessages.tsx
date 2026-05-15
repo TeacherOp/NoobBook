@@ -31,6 +31,53 @@ import { cn } from '@/lib/utils';
 
 const log = createLogger('chat-messages');
 
+/**
+ * Format a message timestamp for display next to the bubble.
+ *
+ * Today  → "3:45 PM"
+ * This year, different day → "May 11, 3:45 PM"
+ * Different year          → "May 11, 2025, 3:45 PM"
+ *
+ * Invalid / missing timestamps return an empty string so the caller can
+ * skip rendering without an extra guard.
+ */
+const formatMessageTime = (raw?: string): string => {
+  if (!raw) return '';
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return '';
+
+  const now = new Date();
+  const timePart = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const sameDay = d.toDateString() === now.toDateString();
+  if (sameDay) return timePart;
+
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const datePart = d.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
+  return `${datePart}, ${timePart}`;
+};
+
+const MessageTimestamp: React.FC<{ raw?: string; align: 'left' | 'right' }> = ({ raw, align }) => {
+  const formatted = formatMessageTime(raw);
+  if (!formatted) return null;
+  return (
+    <p
+      className={cn(
+        'mt-1 text-[11px] text-muted-foreground/80 select-none',
+        align === 'right' ? 'text-right' : 'text-left'
+      )}
+      // Surface full ISO on hover so users can copy exact time if needed —
+      // the visible form is intentionally short to keep the chat tidy.
+      title={raw}
+    >
+      {formatted}
+    </p>
+  );
+};
+
 interface ChatMessagesProps {
   messages: Message[];
   sending: boolean;
@@ -700,6 +747,7 @@ export const ChatMessages: React.FC<ChatMessagesProps> = React.memo(({
                 studioAssetRewriter={studioAssetRewriter}
               />
             )}
+            <MessageTimestamp raw={msg.timestamp} align={msg.role === 'user' ? 'right' : 'left'} />
             {msg.error && (
               <p className="text-xs text-destructive text-center mt-1">
                 This message had an error

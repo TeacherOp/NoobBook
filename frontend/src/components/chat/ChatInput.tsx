@@ -300,7 +300,11 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             onChange={(e) => onMessageChange(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            className={`flex-1 py-1.5 min-h-[32px] max-h-[100px] resize-none border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent ${
+            // `resize-y` exposes the native bottom-right drag handle so
+            // users can pull the box taller when they're drafting longer
+            // messages. min/max bound it so the input can't shrink to a
+            // single line or swallow the entire chat surface.
+            className={`flex-1 py-1.5 min-h-[32px] max-h-[400px] resize-y border-0 focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent ${
               partialTranscript ? 'text-muted-foreground' : ''
             }`}
             disabled={sending || isRecording}

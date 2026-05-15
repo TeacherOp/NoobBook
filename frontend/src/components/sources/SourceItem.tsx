@@ -16,6 +16,7 @@ import {
   FileHtml,
   FilePng,
   FileJpg,
+  FileXls,
   MarkdownLogo,
   File,
   MusicNote,
@@ -93,6 +94,7 @@ const getSourceIcon = (source: Source): { icon: typeof File; weight?: 'bold' } =
     case '.pptx': return { icon: FilePpt, weight: 'bold' };
     case '.txt': return { icon: FileText, weight: 'bold' };
     case '.csv': return { icon: FileCsv, weight: 'bold' };
+    case '.xlsx': return { icon: FileXls, weight: 'bold' };
     case '.database': return { icon: Table, weight: 'bold' };
     case '.mcp': return { icon: Plug, weight: 'bold' };
     case '.md': return { icon: MarkdownLogo, weight: 'bold' };

@@ -72,7 +72,7 @@ export const ALLOWED_EXTENSIONS = {
   document: ['.pdf', '.txt', '.docx', '.pptx', '.md', '.json', '.html', '.xml'],
   image: ['.jpeg', '.jpg', '.png', '.gif', '.webp'],
   audio: ['.mp3', '.wav', '.m4a', '.aac', '.flac'],
-  data: ['.csv'],
+  data: ['.csv', '.xlsx'],
 };
 
 /**

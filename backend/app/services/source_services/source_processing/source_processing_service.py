@@ -56,6 +56,7 @@ class SourceProcessingService:
         ".xml": "text",
         ".docx": "docx",
         ".csv": "csv",  # CSV files (including Google Sheets exports)
+        ".xlsx": "xlsx",  # Excel workbooks — converted to CSV then routed through csv pipeline
         ".jpeg": "image",
         ".jpg": "image",
         ".png": "image",
@@ -159,6 +160,10 @@ class SourceProcessingService:
             elif processor_type == "csv":
                 from app.services.source_services.source_processing.csv_processor import process_csv
                 return process_csv(project_id, source_id, source, raw_file_path, source_service)
+
+            elif processor_type == "xlsx":
+                from app.services.source_services.source_processing.xlsx_processor import process_xlsx
+                return process_xlsx(project_id, source_id, source, raw_file_path, source_service)
 
             elif processor_type == "image":
                 from app.services.source_services.source_processing.image_processor import process_image

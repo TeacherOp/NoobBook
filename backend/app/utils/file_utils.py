@@ -38,6 +38,7 @@ ALLOWED_EXTENSIONS: Dict[str, str] = {
     '.webp': 'image',
     # Data
     '.csv': 'data',
+    '.xlsx': 'data',
     # Links (stored as JSON with URL metadata)
     '.link': 'link',
 }
@@ -63,6 +64,7 @@ MIME_TYPES: Dict[str, str] = {
     '.gif': 'image/gif',
     '.webp': 'image/webp',
     '.csv': 'text/csv',
+    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     '.link': 'application/json',
 }
 

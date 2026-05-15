@@ -147,14 +147,19 @@ def _resolve_identity() -> RequestIdentity:
                 )
                 user_id = claims.get("sub")
                 email = claims.get("email")
-                # GoTrue puts the verified flag at the top level when
-                # autoconfirm is on, and inside `user_metadata` otherwise.
-                # Read both, default False.
-                user_metadata = claims.get("user_metadata") or {}
-                email_verified = bool(
-                    claims.get("email_verified")
-                    or user_metadata.get("email_verified")
-                )
+                # Trust ONLY `email_confirmed_at` — it's set server-side
+                # by GoTrue when the user completes email verification
+                # and ends up in the JWT's signed claims, NOT writable
+                # by the user. `user_metadata.email_verified` maps to
+                # `raw_user_meta_data` which any authenticated caller
+                # can overwrite via `auth.updateUser({data: {...}})`, so
+                # treating it as a verification signal is a forgeable
+                # gate. Top-level `email_verified` is non-standard in
+                # GoTrue v2 and not consistently populated, so we don't
+                # honour it either. If `email_confirmed_at` isn't in the
+                # token, default to False and rely on the slow path
+                # (auth.get_user()) below for an authoritative check.
+                email_verified = bool(claims.get("email_confirmed_at"))
                 if user_id:
                     role = _load_role_from_users_table(str(user_id)) or ROLE_USER
                     return RequestIdentity(

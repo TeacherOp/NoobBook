@@ -69,11 +69,16 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(({
   const { hasPermission } = usePermissions();
 
   // Platform-aware shortcut glyph: ⌘ on Mac, Ctrl elsewhere. Memoised so the
-  // tooltip body doesn't recompute on every parent re-render.
+  // tooltip body doesn't recompute on every parent re-render. navigator.platform
+  // is deprecated; prefer userAgentData.platform (Chromium-only) with a
+  // userAgent-string fallback for Safari / Firefox.
   const shortcutLabel = useMemo(() => {
-    const isMac =
-      typeof navigator !== 'undefined' &&
-      /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+    if (typeof navigator === 'undefined') return 'Ctrl+⇧+O';
+    const uaDataPlatform = (
+      navigator as Navigator & { userAgentData?: { platform?: string } }
+    ).userAgentData?.platform;
+    const platformHint = uaDataPlatform || navigator.userAgent || '';
+    const isMac = /Mac|iPhone|iPad|iPod/i.test(platformHint);
     return isMac ? '⌘⇧O' : 'Ctrl+⇧+O';
   }, []);
 

@@ -172,3 +172,20 @@
   55%  { transform: translateX(310%); }
   100% { transform: translateX(310%); }
 }
+
+/* Onboarding tour intro animation — used by OnboardingTutorial on the first
+   centered welcome step before it anchors to a panel. Greptile P1 (PR #277). */
+@keyframes tutorial-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.tutorial-scale-in {
+  animation: tutorial-scale-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}

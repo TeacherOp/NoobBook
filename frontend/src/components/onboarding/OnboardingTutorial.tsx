@@ -416,9 +416,10 @@ export const OnboardingTutorial: React.FC = () => {
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — must sit BELOW the highlighted target (z-9998 via JS in
+          updatePosition) so the spotlight is visible. Greptile P1 (PR #277). */}
       <div
-        className="fixed inset-0 z-[9998] cursor-pointer"
+        className="fixed inset-0 z-[9997] cursor-pointer"
         style={{
           background: 'rgba(0, 0, 0, 0.18)',
           backdropFilter: 'blur(1px)',

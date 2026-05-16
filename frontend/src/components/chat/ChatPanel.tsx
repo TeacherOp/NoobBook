@@ -990,6 +990,32 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     }
   };
 
+  // Keep a ref to the latest handleNewChat so the global keydown listener
+  // (mounted once) always fires the up-to-date closure instead of capturing
+  // the first render's stale setters / toast helpers.
+  const handleNewChatRef = useRef(handleNewChat);
+  handleNewChatRef.current = handleNewChat;
+
+  // Cmd/Ctrl+Shift+O → new chat (Claude-app parity, Sno 51 / GH #254).
+  // Overrides Chrome's bookmarks-manager binding intentionally — matches
+  // Claude.app's behaviour. Only mounted while ChatPanel is rendered (i.e.
+  // inside a project workspace), so the shortcut is workspace-scoped.
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        e.key.toLowerCase() === 'o'
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        handleNewChatRef.current();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
   /**
    * Select a chat from the list
    */

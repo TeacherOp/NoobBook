@@ -4,7 +4,7 @@
  * Allows quick switching between chats via dropdown menu.
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,6 +68,15 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(({
 }) => {
   const { hasPermission } = usePermissions();
 
+  // Platform-aware shortcut glyph: ⌘ on Mac, Ctrl elsewhere. Memoised so the
+  // tooltip body doesn't recompute on every parent re-render.
+  const shortcutLabel = useMemo(() => {
+    const isMac =
+      typeof navigator !== 'undefined' &&
+      /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+    return isMac ? '⌘⇧O' : 'Ctrl+⇧+O';
+  }, []);
+
   return (
     <div className="border-b px-4 py-3">
       {/* Title row - matches Sources/Studio/ChatEmptyState structure */}
@@ -112,6 +121,29 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(({
           </DropdownMenu>
         </div>
         <div className="flex items-center gap-2">
+          {/* Prominent "New chat" button — Claude-app parity (Sno 51 / GH #254).
+              Same handler as the dropdown item below; the dropdown stays for
+              muscle memory but this is the one-click affordance. */}
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="soft"
+                  size="sm"
+                  onClick={onNewChat}
+                  className="h-8 gap-1.5"
+                >
+                  <Plus size={14} weight="bold" />
+                  <span>New chat</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                New chat
+                <kbd className="ml-1.5 text-xs opacity-70">{shortcutLabel}</kbd>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
           {/* Export chat button — hidden when chat_export permission is disabled */}
           {hasPermission("chat_features", "chat_export") && (
             <TooltipProvider>

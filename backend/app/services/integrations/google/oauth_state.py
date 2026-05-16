@@ -100,6 +100,13 @@ def _issue_nonce(user_id: str) -> str:
     return nonce
 
 
+class InvalidUserIdError(ValueError):
+    """Raised when sign_state is called without a real user_id to bind
+    the OAuth flow to. Surfaces to /google/auth as a 400 so the
+    frontend can prompt the user to sign in first instead of letting
+    PostgREST 500 on the `UUID NOT NULL` constraint."""
+
+
 def _consume_nonce(nonce: str) -> bool:
     """Atomically claim a nonce. Returns True if the row existed (we
     just deleted it; valid first-use), False if it didn't (replay or
@@ -117,7 +124,17 @@ def _consume_nonce(nonce: str) -> bool:
 
 
 def sign_state(user_id: str) -> str:
-    """Mint an HMAC-signed, nonce-protected `state` value for the auth URL."""
+    """Mint an HMAC-signed, nonce-protected `state` value for the auth URL.
+
+    `user_id` must be a non-empty UUID string — the persistent nonce row
+    has a `UUID NOT NULL` column, and there's no semantically meaningful
+    OAuth flow without a real user to attribute the token to. Single-user
+    deployments with an empty users table hit this branch; the caller
+    should propagate it as a 400 so the frontend prompts for sign-in
+    instead of silently 500-ing on the constraint.
+    """
+    if not user_id:
+        raise InvalidUserIdError("sign_state requires a non-empty user_id")
     now = int(time.time())
     nonce = _issue_nonce(user_id)
     payload = json.dumps(

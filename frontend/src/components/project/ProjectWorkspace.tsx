@@ -181,7 +181,7 @@ export const ProjectWorkspace: React.FC<ProjectWorkspaceProps> = ({
 
             {/* Center Panel - Chat */}
             <ResizablePanel defaultSize={55} minSize={30} className="bg-card overflow-hidden rounded-xl min-w-0">
-              <div className="h-full min-h-0 min-w-0 w-full flex flex-col overflow-hidden">
+              <div className="h-full min-h-0 min-w-0 w-full flex flex-col overflow-hidden" data-tour="chat-panel">
                 <ChatPanel
                   projectId={project.id}
                   projectName={project.name}

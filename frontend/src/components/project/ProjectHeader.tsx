@@ -28,7 +28,7 @@ import {
   CollapsibleTrigger,
 } from '../ui/collapsible';
 import { Textarea } from '../ui/textarea';
-import { ArrowLeft, DotsThreeVertical, Plus, Trash, FolderOpen, Gear, CircleNotch, CurrencyDollar, Brain, CaretDown, CaretRight, PencilSimple, SignOut } from '@phosphor-icons/react';
+import { ArrowLeft, DotsThreeVertical, Plus, Trash, FolderOpen, Gear, CircleNotch, CurrencyDollar, Brain, CaretDown, CaretRight, PencilSimple, SignOut, Compass } from '@phosphor-icons/react';
 import { Input } from '../ui/input';
 import { chatsAPI, type PromptConfig } from '../../lib/api/chats';
 import { projectsAPI, type CostTracking, type MemoryData } from '../../lib/api';
@@ -38,6 +38,7 @@ import { useToast } from '../ui/use-toast';
 import { createLogger } from '@/lib/logger';
 import { ShareButton } from './ShareButton';
 import { LogsButton } from './LogsButton';
+import { useTutorial } from '@/hooks/useTutorial';
 
 const log = createLogger('project-header');
 
@@ -70,6 +71,8 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
   onSignOut,
 }) => {
   const { toasts, dismissToast, error, success, errorWithLogs } = useToast();
+  // Used by the kebab-menu "Replay onboarding tour" item below.
+  const { startTutorial } = useTutorial();
 
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
   const [settingsDialogOpen, setSettingsDialogOpen] = React.useState(false);
@@ -409,6 +412,7 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
           size="sm"
           onClick={handleOpenMemory}
           className="gap-2"
+          data-tour="memory-btn"
         >
           <Brain size={16} />
           Memory
@@ -447,6 +451,10 @@ export const ProjectHeader: React.FC<ProjectHeaderProps> = ({
             }}>
               <PencilSimple size={16} className="mr-2" />
               Rename Project
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={startTutorial}>
+              <Compass size={16} className="mr-2" />
+              Replay onboarding tour
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem

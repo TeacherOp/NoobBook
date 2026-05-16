@@ -15,6 +15,8 @@ import { GlobalLogsModalGate } from './components/project/GlobalLogsModalGate';
 import { setAdminMode, SESSION_EXPIRED_EVENT } from './lib/adminMode';
 import { useToast } from './components/ui/use-toast';
 import { ToastContainer } from './components/ui/toast';
+import { TutorialProvider } from './contexts/TutorialContext';
+import { OnboardingTutorial } from './components/onboarding';
 
 const log = createLogger('app');
 
@@ -180,16 +182,23 @@ function ProjectWorkspaceRoute({
   // (malformed citation, missing message field, etc.) doesn't blank the
   // entire page — that was Neel's "screen goes blank, refresh fixes it" bug.
   // resetKey=projectId so navigating to a different project recovers cleanly.
+  // TutorialProvider is scoped to the workspace route so the first-run
+  // auto-open only fires when the user actually lands on a project (not on
+  // the dashboard or a /share/* viewer). OnboardingTutorial is a sibling so
+  // its absolutely-positioned popover renders on top of the workspace.
   return (
     <ErrorBoundary resetKey={projectId}>
-      <ProjectWorkspace
-        project={project}
-        onBack={() => navigate('/')}
-        onDeleteProject={handleDeleteProject}
-        onRenameProject={handleRenameProject}
-        onSignOut={isAuthenticated ? onSignOut : undefined}
-        isAdmin={isAdmin}
-      />
+      <TutorialProvider>
+        <ProjectWorkspace
+          project={project}
+          onBack={() => navigate('/')}
+          onDeleteProject={handleDeleteProject}
+          onRenameProject={handleRenameProject}
+          onSignOut={isAuthenticated ? onSignOut : undefined}
+          isAdmin={isAdmin}
+        />
+        <OnboardingTutorial />
+      </TutorialProvider>
     </ErrorBoundary>
   );
 }

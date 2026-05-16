@@ -14,45 +14,48 @@ What we do now
 - `state = base64url(payload).base64url(hmac)` where payload is a tiny
   JSON object `{u: user_id, n: nonce, e: exp_unix}` and hmac is computed
   with SECRET_KEY.
-- Nonce is a 16-byte random token. We track issued nonces in a
-  process-local set so each one is single-use; a captured state can't
-  be replayed within its (10 min) window.
+- Nonce is a random token. We persist issued nonces in the Supabase
+  `oauth_state_nonces` table so each one is single-use AND the mint
+  and verify can land on different gunicorn workers — the in-process
+  dict version of this module deadlocked multi-worker deployments.
 - Verification checks: HMAC integrity, exp not in the past, nonce was
-  issued by THIS process AND hasn't been consumed yet. If any of those
-  fail we treat the callback as adversarial and refuse the exchange.
+  issued by us AND hasn't been consumed yet (atomic DELETE...RETURNING
+  in Supabase). If any of those fail we treat the callback as
+  adversarial and refuse the exchange.
 
 Server-restart behaviour
 ------------------------
-The nonce set lives in memory. On Coolify redeploy / proxy bounce / OOM
-the set is empty, so OAuth flows that started before the restart and
-finished after will hard-fail verification. The user just clicks
-Connect again. We considered persisting nonces in Supabase but the
-restart window is short and the failure mode is graceful (retry).
+Persistent storage means OAuth flows that straddle a deploy/restart
+still verify cleanly — the nonce row outlives any single process. Rows
+older than the 10-minute TTL are pruned opportunistically on each
+`sign_state()` call so the table self-cleans.
 """
 import base64
 import hashlib
 import hmac
 import json
+import logging
 import os
 import secrets
-import threading
 import time
 from typing import Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
 
 # 10 minutes — the gap between minting the URL and the user clicking
 # Allow in Google's consent screen. Longer windows widen the replay
 # surface; shorter windows kick out users who think before clicking.
 STATE_TTL_SECONDS = 600
 
-# Cap how many nonces we'll remember to bound memory. At one flow per
-# user per ~minute this would take ~5h of sustained traffic to fill;
-# the periodic prune below keeps real-world usage well below this.
-_NONCE_CAP = 4096
+_TABLE = "oauth_state_nonces"
 
-_nonce_lock = threading.Lock()
-# nonce -> issued_at unix timestamp. We remove on use (single-use) and
-# prune expired entries on every read so the set self-cleans.
-_issued_nonces: dict[str, int] = {}
+
+def _supabase():
+    """Lazy import so importing this module at app boot doesn't pull
+    the whole supabase package (avoids a circular init in tests)."""
+    from app.services.integrations.supabase import get_supabase
+    return get_supabase()
 
 
 def _secret_key_bytes() -> bytes:
@@ -72,28 +75,51 @@ def _b64url_decode(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + ("=" * pad))
 
 
-def _prune_expired(now: int) -> None:
-    """Drop nonces past their TTL. Cheap enough to run on every issue/check."""
-    expired = [n for n, t in _issued_nonces.items() if now - t > STATE_TTL_SECONDS]
-    for n in expired:
-        _issued_nonces.pop(n, None)
+def _prune_expired() -> None:
+    """Best-effort cleanup of stale nonces. Runs on every issue so the
+    table self-cleans without a separate cron. Errors are swallowed
+    because pruning is a tidiness concern, not a correctness one."""
+    cutoff = time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ",
+        time.gmtime(time.time() - STATE_TTL_SECONDS),
+    )
+    try:
+        _supabase().table(_TABLE).delete().lt("created_at", cutoff).execute()
+    except Exception as exc:
+        logger.warning("oauth nonce prune failed (non-fatal): %s", exc)
+
+
+def _issue_nonce(user_id: str) -> str:
+    """Mint a fresh nonce and persist it. Caller signs the resulting
+    payload immediately so we don't carry per-mint state in process."""
+    nonce = secrets.token_urlsafe(18)
+    _supabase().table(_TABLE).insert(
+        {"nonce": nonce, "user_id": user_id}
+    ).execute()
+    _prune_expired()
+    return nonce
+
+
+def _consume_nonce(nonce: str) -> bool:
+    """Atomically claim a nonce. Returns True if the row existed (we
+    just deleted it; valid first-use), False if it didn't (replay or
+    unknown). Postgres DELETE...RETURNING via PostgREST returns the
+    deleted rows in `response.data` — empty list means no match."""
+    response = (
+        _supabase()
+        .table(_TABLE)
+        .delete()
+        .eq("nonce", nonce)
+        .execute()
+    )
+    rows = response.data or []
+    return bool(rows)
 
 
 def sign_state(user_id: str) -> str:
     """Mint an HMAC-signed, nonce-protected `state` value for the auth URL."""
     now = int(time.time())
-    nonce = secrets.token_urlsafe(12)
-
-    with _nonce_lock:
-        _prune_expired(now)
-        # Hard cap. Drop the oldest to make room rather than fail issuance
-        # — under attack we'd rather rotate old in-flight flows than reject
-        # legitimate users who happen to click Connect during a flood.
-        if len(_issued_nonces) >= _NONCE_CAP:
-            oldest = sorted(_issued_nonces.items(), key=lambda kv: kv[1])[0][0]
-            _issued_nonces.pop(oldest, None)
-        _issued_nonces[nonce] = now
-
+    nonce = _issue_nonce(user_id)
     payload = json.dumps(
         {"u": user_id, "n": nonce, "e": now + STATE_TTL_SECONDS},
         separators=(",", ":"),
@@ -138,13 +164,16 @@ def verify_state(state: Optional[str]) -> Tuple[bool, Optional[str], Optional[st
     if now > exp:
         return False, None, "state expired"
 
-    # Single-use: pop the nonce. If it isn't in the set, the state was
-    # either replayed, minted by a since-restarted process, or never
-    # issued by us at all — all three are rejection cases.
-    with _nonce_lock:
-        _prune_expired(now)
-        if nonce not in _issued_nonces:
-            return False, None, "state replayed or unknown"
-        _issued_nonces.pop(nonce, None)
+    # Atomic single-use claim via Postgres DELETE. If no row was
+    # deleted, the nonce was either replayed, expired and pruned, or
+    # never issued by us — all three are rejection cases.
+    try:
+        consumed = _consume_nonce(nonce)
+    except Exception as exc:
+        logger.warning("oauth nonce consume failed: %s", exc)
+        return False, None, "state store unavailable"
+
+    if not consumed:
+        return False, None, "state replayed or unknown"
 
     return True, user_id, None

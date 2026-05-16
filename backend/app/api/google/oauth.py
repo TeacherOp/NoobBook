@@ -31,6 +31,7 @@ from typing import Optional
 from flask import jsonify, request, current_app, make_response
 from app.api.google import google_bp
 from app.services.integrations.google import google_auth_service
+from app.services.integrations.google.oauth_state import verify_state
 from app.services.auth.rbac import get_request_identity
 
 
@@ -235,9 +236,16 @@ def google_callback():
         if not code:
             return _render_callback_page('error', 'No authorization code')
 
-        # Get user_id from state parameter (for multi-user support)
-        # State was set in get_auth_url() to identify which user initiated OAuth
-        user_id = request.args.get('state') or None
+        # Verify the HMAC-signed state. Failures here mean the request
+        # didn't come from a flow we minted — treat as adversarial and
+        # bail before exchanging the code (otherwise we'd happily link
+        # the attacker's Google account to whatever user_id they put in
+        # the raw state). Replay protection is built into verify_state.
+        raw_state = request.args.get('state') or None
+        state_ok, user_id, state_err = verify_state(raw_state)
+        if not state_ok:
+            current_app.logger.warning("Google OAuth rejected: %s", state_err)
+            return _render_callback_page('error', 'Invalid sign-in request')
 
         # Exchange code for tokens, passing user_id for storage
         success, message = google_auth_service.handle_callback(code, user_id=user_id)

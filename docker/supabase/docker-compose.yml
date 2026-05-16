@@ -479,9 +479,18 @@ services:
     container_name: supabase-minio
     image: minio/minio:RELEASE.2024-01-16T16-07-38Z
     restart: unless-stopped
+    # Bind to localhost only — MinIO is an internal storage backend for
+    # imgproxy and is not part of the public API surface. Exposing on
+    # 0.0.0.0 with the default `supabase / supabase123` credentials let
+    # anyone on the box's network reach the admin console; binding to
+    # 127.0.0.1 keeps the ports reachable from same-host services
+    # (imgproxy via the docker network still works since it uses the
+    # internal `minio` DNS name, not the host port mapping). The fallback
+    # defaults in the env vars below are still considered insecure and
+    # docker/setup.sh regenerates real values into .env on first run.
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:9001:9001"
     volumes:
       - ./volumes/minio/data:/data
     environment:

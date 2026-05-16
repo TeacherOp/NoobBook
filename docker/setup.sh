@@ -159,6 +159,13 @@ if [ ! -f "$SUPABASE_ENV" ]; then
     LOGFLARE_PUBLIC=$(generate_hex 24)
     LOGFLARE_PRIVATE=$(generate_hex 24)
     POOLER_TENANT_ID=$(generate_hex 8)
+    # MinIO root credentials. The vendored compose file ships with
+    # `supabase / supabase123` defaults — fine for the upstream demo
+    # but a footgun if a self-hoster ever exposes 9000/9001 publicly.
+    # Generating fresh creds on first run makes those defaults
+    # irrelevant even when ports drift to 0.0.0.0.
+    MINIO_ROOT_USER="noobbook_$(generate_hex 4)"
+    MINIO_ROOT_PASSWORD=$(generate_password)
 
     ANON_KEY=$(generate_jwt "anon" "$JWT_SECRET")
     SERVICE_ROLE_KEY=$(generate_jwt "service_role" "$JWT_SECRET")
@@ -178,6 +185,8 @@ if [ ! -f "$SUPABASE_ENV" ]; then
     replace_env_var "$SUPABASE_ENV" "LOGFLARE_PUBLIC_ACCESS_TOKEN" "$LOGFLARE_PUBLIC"
     replace_env_var "$SUPABASE_ENV" "LOGFLARE_PRIVATE_ACCESS_TOKEN" "$LOGFLARE_PRIVATE"
     replace_env_var "$SUPABASE_ENV" "POOLER_TENANT_ID" "$POOLER_TENANT_ID"
+    replace_env_var "$SUPABASE_ENV" "MINIO_ROOT_USER" "$MINIO_ROOT_USER"
+    replace_env_var "$SUPABASE_ENV" "MINIO_ROOT_PASSWORD" "$MINIO_ROOT_PASSWORD"
 
     success "Supabase .env created with generated secrets"
 else

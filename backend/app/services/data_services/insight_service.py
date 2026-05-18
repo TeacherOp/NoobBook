@@ -264,9 +264,14 @@ class InsightService:
                     # refresh is better than failing the insight forever.
                     chat_id = None
             if not chat_id:
+                # seed_default_sources=False so a legacy insight whose
+                # original chat searched all active sources doesn't suddenly
+                # get filtered to DB-only on its first post-deploy refresh
+                # (Sno 40 / #247 — auto-seed is only for user-initiated chats).
                 chat = chat_service.create_chat(
                     project_id,
                     title=insight["title"][:50] or "Saved insight",
+                    seed_default_sources=False,
                 )
                 chat_id = chat["id"]
                 self.supabase.table(self.TABLE).update({"chat_id": chat_id}).eq(

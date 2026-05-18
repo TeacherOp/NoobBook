@@ -187,7 +187,12 @@ class ChatService:
         ids = [row["id"] for row in (response.data or []) if row.get("id")]
         return ids if ids else None
 
-    def create_chat(self, project_id: str, title: str = "New Chat") -> Dict[str, Any]:
+    def create_chat(
+        self,
+        project_id: str,
+        title: str = "New Chat",
+        seed_default_sources: bool = True,
+    ) -> Dict[str, Any]:
         """
         Create a new chat in a project.
 
@@ -197,6 +202,13 @@ class ChatService:
         Args:
             project_id: The project UUID
             title: Initial chat title
+            seed_default_sources: When True (default — user-initiated chats),
+                pre-select the project's DB-type sources so the user doesn't
+                have to toggle them on (Sno 40 / #247). When False (programmatic
+                callers like insight refreshes), leave `selected_source_ids`
+                NULL so the context loader falls back to "all active sources" —
+                preserving legacy behavior for content that lives outside the
+                DB-source allowlist (PDFs, links, audio, etc.).
 
         Returns:
             Created chat metadata
@@ -206,9 +218,10 @@ class ChatService:
             "title": title
         }
 
-        default_source_ids = self._default_source_ids(project_id)
-        if default_source_ids is not None:
-            chat_data["selected_source_ids"] = default_source_ids
+        if seed_default_sources:
+            default_source_ids = self._default_source_ids(project_id)
+            if default_source_ids is not None:
+                chat_data["selected_source_ids"] = default_source_ids
 
         response = (
             self.supabase.table(self.table)

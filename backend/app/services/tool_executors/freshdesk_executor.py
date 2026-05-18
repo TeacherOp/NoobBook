@@ -255,10 +255,17 @@ class FreshdeskExecutor:
         a direct DB route.
         """
         try:
-            from app.services.integrations.supabase import get_supabase
+            # Dedicated service-role client (defense in depth). Migration
+            # 00037 revoked EXECUTE on this RPC from `authenticated`,
+            # leaving only `service_role`. Even with the auth-verifier
+            # fix keeping gotrue events off the data singleton, this
+            # callsite must NEVER run as `authenticated` or it 42501-s,
+            # so we pin it to a client whose Authorization header is
+            # guaranteed-immutable for the life of the process.
+            from app.services.integrations.supabase import get_service_role_client
             from postgrest.exceptions import APIError
 
-            supabase = get_supabase()
+            supabase = get_service_role_client()
             start = time.time()
             resp = supabase.rpc("exec_freshdesk_query", {"sql_query": sql}).execute()
             elapsed = round((time.time() - start) * 1000, 1)

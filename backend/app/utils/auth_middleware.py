@@ -27,7 +27,7 @@ from typing import Optional, Dict, Tuple
 
 import jwt
 from flask import request, jsonify, g
-from app.services.integrations.supabase import get_supabase
+from app.services.integrations.supabase import get_auth_verifier_client
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +192,12 @@ def validate_token() -> Optional[str]:
                 if _get_cached_user_id(token):
                     return user_id
                 try:
-                    supabase = get_supabase()
+                    # Dedicated client: keeps gotrue's auth-event listener
+                    # off the data singleton so a SIGNED_IN / TOKEN_REFRESHED
+                    # firing during this verify call can't flip the
+                    # singleton's postgrest Authorization header to a user
+                    # JWT and 42501 every service-role-only RPC after.
+                    supabase = get_auth_verifier_client()
                     response = supabase.auth.get_user(token)
                     if response and response.user:
                         _cache_token(token, user_id)
@@ -240,7 +245,9 @@ def validate_token() -> Optional[str]:
         return cached_user_id
 
     try:
-        supabase = get_supabase()
+        # Same dedicated client as the fast-path slow-confirm above —
+        # keeps the data singleton's identity pinned to service_role.
+        supabase = get_auth_verifier_client()
         user_response = supabase.auth.get_user(token)
 
         if not user_response or not user_response.user:

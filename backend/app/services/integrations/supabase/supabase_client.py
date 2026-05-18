@@ -8,6 +8,7 @@ from environment variables and provides a clean interface for database operation
 
 import logging
 import os
+import threading
 from typing import Optional
 from supabase import create_client, Client
 from dotenv import load_dotenv
@@ -153,6 +154,68 @@ def create_dedicated_client() -> Client:
     if not supabase_url or not supabase_key:
         raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_KEY (or ANON_KEY) must be set")
     return create_client(supabase_url, supabase_key)
+
+
+# Process-wide dedicated clients for the two roles that must not share state
+# with the data singleton. Lazy-initialised; locked so the first concurrent
+# requests don't race and build two clients.
+_auth_verifier_client: Optional[Client] = None
+_auth_verifier_lock = threading.Lock()
+
+_service_role_client: Optional[Client] = None
+_service_role_lock = threading.Lock()
+
+
+def get_auth_verifier_client() -> Client:
+    """Dedicated client used ONLY for verifying user JWTs.
+
+    Why: supabase-py 2.x registers an `on_auth_state_change` listener on
+    the Client that resets `self._postgrest` and rewrites
+    `self.options.headers['Authorization']` whenever the gotrue client
+    fires SIGNED_IN / TOKEN_REFRESHED. Calling `auth.get_user(token)`
+    against the data singleton from `get_supabase()` can — depending on
+    gotrue's in-memory session state and the events it emits — flip the
+    singleton's role from `service_role` to `authenticated`. Once
+    flipped, every subsequent `.table()` / `.rpc()` from the singleton
+    runs as the user, which 42501-s any RPC the migrations revoked from
+    authenticated (notably `exec_freshdesk_query` after migration 00037).
+
+    Symptoms we have seen in production: a sign-in is followed within
+    seconds by `permission denied for function exec_freshdesk_query`
+    that only clears on container restart.
+
+    Use this client EXCLUSIVELY for `auth.get_user(token)` /
+    revocation-check calls. Never call `.table()` / `.rpc()` on it —
+    pollution stays contained even if the listener fires.
+    """
+    global _auth_verifier_client
+    if _auth_verifier_client is None:
+        with _auth_verifier_lock:
+            if _auth_verifier_client is None:
+                _auth_verifier_client = create_dedicated_client()
+    return _auth_verifier_client
+
+
+def get_service_role_client() -> Client:
+    """Dedicated service-role client for calls that must run as service_role.
+
+    Defense-in-depth twin of `get_auth_verifier_client`. Even though the
+    auth verifier already keeps gotrue events off the data singleton,
+    some future code path could regress that. RPCs that the migrations
+    revoked from `authenticated` (e.g. `exec_freshdesk_query`) need a
+    hard guarantee that their client's Authorization header stays
+    `Bearer <SUPABASE_SERVICE_KEY>` for the life of the process.
+
+    Use this client for RPCs that are revoked from `authenticated`.
+    Never call `auth.*` methods on it — that is what guarantees the
+    listener never fires and the postgrest header never flips.
+    """
+    global _service_role_client
+    if _service_role_client is None:
+        with _service_role_lock:
+            if _service_role_client is None:
+                _service_role_client = create_dedicated_client()
+    return _service_role_client
 
 
 def is_supabase_enabled() -> bool:

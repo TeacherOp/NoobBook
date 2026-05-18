@@ -23,7 +23,11 @@ from typing import Any, Callable, Dict, Optional, TypeVar
 import jwt
 from flask import g, jsonify, request
 
-from app.services.integrations.supabase import get_supabase, is_supabase_enabled
+from app.services.integrations.supabase import (
+    get_supabase,
+    get_auth_verifier_client,
+    is_supabase_enabled,
+)
 from app.services.data_services.project_service import DEFAULT_USER_ID
 
 
@@ -178,8 +182,12 @@ def _resolve_identity() -> RequestIdentity:
 
         # Slow path: original Supabase Auth roundtrip. Only reached
         # when JWT_SECRET isn't set or local decode unexpectedly failed.
+        # Dedicated client so gotrue's auth-event listener can't flip the
+        # data singleton's role to authenticated (see
+        # supabase_client.get_auth_verifier_client for the full incident
+        # write-up).
         try:
-            supabase = get_supabase()
+            supabase = get_auth_verifier_client()
             user_resp = supabase.auth.get_user(token)
             user = getattr(user_resp, "user", None) or user_resp
             user_id = getattr(user, "id", None) or (user.get("id") if isinstance(user, dict) else None)

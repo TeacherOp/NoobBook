@@ -18,6 +18,11 @@ from app.services.integrations.supabase import get_supabase, is_supabase_enabled
 
 logger = logging.getLogger(__name__)
 
+# Source types that represent live data connectors ("DB sources").
+# New chats start with these auto-selected so users don't have to toggle
+# them on every time (roadmap Sno 40 / GH #247).
+DB_SOURCE_TYPES = ("DATABASE", "CSV", "FRESHDESK", "JIRA", "MIXPANEL", "MCP")
+
 
 class ChatService:
     """
@@ -153,6 +158,35 @@ class ChatService:
             text = str(content) if content else ""
         return bool(text.strip())
 
+    def _default_source_ids(self, project_id: str) -> Optional[List[str]]:
+        """
+        Resolve the source IDs to pre-select on a freshly created chat.
+
+        We auto-check every ready, globally-active DB-type source (DATABASE,
+        CSV, FRESHDESK, JIRA, MIXPANEL, MCP) so users don't have to toggle
+        them every time they start a new chat (roadmap Sno 40 / GH #247).
+
+        Returns None when the project has no DB-type sources, which keeps
+        the legacy `selected_source_ids IS NULL` fallback semantics (use all
+        active sources) intact for projects that only have documents/links.
+        """
+        try:
+            response = (
+                self.supabase.table("sources")
+                .select("id")
+                .eq("project_id", project_id)
+                .in_("type", list(DB_SOURCE_TYPES))
+                .eq("status", "ready")
+                .eq("is_active", True)
+                .execute()
+            )
+        except Exception as exc:
+            logger.warning("Failed to load default DB sources for %s: %s", project_id, exc)
+            return None
+
+        ids = [row["id"] for row in (response.data or []) if row.get("id")]
+        return ids if ids else None
+
     def create_chat(self, project_id: str, title: str = "New Chat") -> Dict[str, Any]:
         """
         Create a new chat in a project.
@@ -171,6 +205,10 @@ class ChatService:
             "project_id": project_id,
             "title": title
         }
+
+        default_source_ids = self._default_source_ids(project_id)
+        if default_source_ids is not None:
+            chat_data["selected_source_ids"] = default_source_ids
 
         response = (
             self.supabase.table(self.table)

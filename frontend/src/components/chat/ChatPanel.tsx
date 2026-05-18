@@ -981,7 +981,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       const newChat = await chatsAPI.createChat(projectId, 'New Chat');
       setAllChats((prev) => [newChat, ...prev]);
       await loadFullChat(newChat.id);
-      // New chats start with no sources selected (loadFullChat will call onActiveChatChange)
+      // Backend pre-seeds selected_source_ids with the project's DB-type
+      // sources on chat create (Sno 40 / #247); loadFullChat fetches that
+      // selection and notifies parents via onActiveChatChange.
       setShowChatList(false);
       success('New chat created');
     } catch (err) {

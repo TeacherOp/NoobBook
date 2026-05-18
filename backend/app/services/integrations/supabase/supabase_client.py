@@ -209,12 +209,29 @@ def get_service_role_client() -> Client:
     Use this client for RPCs that are revoked from `authenticated`.
     Never call `auth.*` methods on it — that is what guarantees the
     listener never fires and the postgrest header never flips.
+
+    Hard-requires `SUPABASE_SERVICE_KEY`: falling back to the anon key
+    would silently produce a non-service-role client and only surface
+    as a 42501 inside the RPC — defeating the entire point of having
+    a separately-named accessor for this. Mirrors the explicit check
+    in `user_service.__init__`.
     """
     global _service_role_client
     if _service_role_client is None:
         with _service_role_lock:
             if _service_role_client is None:
-                _service_role_client = create_dedicated_client()
+                supabase_url = os.getenv("SUPABASE_URL")
+                service_key = os.getenv("SUPABASE_SERVICE_KEY")
+                if not supabase_url or not service_key:
+                    raise RuntimeError(
+                        "get_service_role_client() requires SUPABASE_URL and "
+                        "SUPABASE_SERVICE_KEY. Anon key is not accepted here — "
+                        "callers (e.g. exec_freshdesk_query) need a hard "
+                        "service_role guarantee, and the anon fallback would "
+                        "silently 42501 at call time. Set SUPABASE_SERVICE_KEY "
+                        "in the backend env."
+                    )
+                _service_role_client = create_client(supabase_url, service_key)
     return _service_role_client
 
 

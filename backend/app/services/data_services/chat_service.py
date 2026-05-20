@@ -146,10 +146,35 @@ class ChatService:
         if msg.get("role") not in ("user", "assistant"):
             return False
         content = msg.get("content")
-        # List-content rows are tool-chain intermediates (assistant
-        # tool_use envelopes and user tool_result wrappers).
+        # List-content rows fall into two distinct buckets:
+        #   1. Tool-chain intermediates (assistant tool_use envelopes,
+        #      user tool_result wrappers) — NOT displayable, the final
+        #      assistant message already carries the accumulated text.
+        #   2. User messages with inline image attachments, persisted as
+        #      [{type:image,...}, {type:text,...}] by the upload route —
+        #      displayable.
+        # Distinguish by inspecting the block types.
         if isinstance(content, list):
-            return False
+            has_tool_block = any(
+                isinstance(b, dict) and b.get("type") in ("tool_use", "tool_result")
+                for b in content
+            )
+            if has_tool_block:
+                return False
+            has_image = any(
+                isinstance(b, dict) and b.get("type") == "image"
+                for b in content
+            )
+            if has_image:
+                return True
+            # Pure-text list (rare but legal) — non-empty if any text block
+            # has non-empty content.
+            text = "\n".join(
+                b.get("text", "")
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            )
+            return bool(text.strip())
         if isinstance(content, dict):
             text = content.get("text", "")
         elif isinstance(content, str):
@@ -315,9 +340,35 @@ class ChatService:
                 if role not in ["user", "assistant"]:
                     continue
 
-                # Skip list-content messages — these are tool chain intermediates
-                # (tool_use assistant responses and tool_result user messages)
+                # List-content rows are either tool-chain intermediates
+                # (skip) or user messages with inline image attachments
+                # (keep — the formatter re-signs storage URLs and projects
+                # the block list down to the frontend shape).
                 if isinstance(content, list):
+                    has_tool_block = any(
+                        isinstance(b, dict) and b.get("type") in ("tool_use", "tool_result")
+                        for b in content
+                    )
+                    if has_tool_block:
+                        continue
+                    # Lazy import: message_service depends on storage_service
+                    # and storage_service depends on supabase client, so a
+                    # top-level import creates a circular load at app start.
+                    from app.services.data_services import message_service as _ms
+                    formatted = _ms.message_service._format_message_for_frontend(msg)
+                    formatted_content = formatted.get("content")
+                    # Skip if the formatter projected the message down to
+                    # nothing renderable (empty list / empty string).
+                    if not formatted_content:
+                        continue
+                    display_messages.append({
+                        "id": formatted.get("id"),
+                        "role": formatted.get("role"),
+                        "content": formatted_content,
+                        "timestamp": formatted.get("timestamp"),
+                        "model": formatted.get("model"),
+                        "citations": formatted.get("citations", []),
+                    })
                     continue
 
                 if isinstance(content, dict):

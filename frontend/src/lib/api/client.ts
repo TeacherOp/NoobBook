@@ -242,11 +242,70 @@ function handlePermanentFailure(): void {
   notifySessionExpired();
 }
 
-// Shared 401 error handler used by both the `api` instance and global `axios` interceptors.
+// ---------- Transient retry for idempotent GETs ----------
+// A deploy cutover (Coolify swap, container boot) makes the backend
+// unreachable for 20-40s. Without retry, every dashboard GET that lands
+// in that window surfaces a hard "Failed to load X" error and the user
+// thinks the app is broken. The 401-refresh interceptor below already
+// retries on auth expiry; this does the analogous thing for the network
+// blip / 5xx case.
+//
+// Bounded: 3 retries at 1s / 2s / 4s exponential backoff, total ~7s
+// before the 4th attempt. Past that, we let the error bubble — a real
+// outage shouldn't be masked indefinitely.
+//
+// Idempotent-only: GET and HEAD. POST/PUT/DELETE may have side effects
+// (created rows, charged tokens, sent emails) so retrying them without
+// an idempotency key would risk duplication. Mutations fail fast.
+const TRANSIENT_STATUSES = new Set([408, 502, 503, 504]);
+const TRANSIENT_MAX_RETRIES = 3;
+const TRANSIENT_BASE_MS = 1000;
+
+function isTransientError(error: AxiosError): boolean {
+  if (error.code === 'ECONNABORTED') return true; // axios client-side timeout
+  if (!error.response) return true; // network / DNS / connection refused
+  return TRANSIENT_STATUSES.has(error.response.status);
+}
+
+function isIdempotentMethod(method: string | undefined): boolean {
+  const m = (method || 'get').toLowerCase();
+  return m === 'get' || m === 'head';
+}
+
+function scheduleTransientRetry(
+  error: AxiosError,
+  retryWith: typeof api | typeof axios,
+): Promise<unknown> | null {
+  const originalRequest = error.config as
+    | (InternalAxiosRequestConfig & { _transientRetries?: number })
+    | undefined;
+  if (!originalRequest) return null;
+  if (!isIdempotentMethod(originalRequest.method)) return null;
+  const attempt = (originalRequest._transientRetries ?? 0) + 1;
+  if (attempt > TRANSIENT_MAX_RETRIES) return null;
+  originalRequest._transientRetries = attempt;
+  const delay = TRANSIENT_BASE_MS * 2 ** (attempt - 1); // 1s, 2s, 4s
+  log.warn(
+    {
+      status: error.response?.status,
+      code: error.code,
+      url: originalRequest.url,
+      attempt,
+    },
+    'transient retry',
+  );
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      retryWith(originalRequest).then(resolve).catch(reject);
+    }, delay);
+  });
+}
+
+// Shared response error handler used by both the `api` instance and global `axios` interceptors.
 // Educational Note: axios.create() instances have separate interceptor chains, so registering
 // on both the `api` instance AND the global `axios` default won't double-fire for `api` requests.
 // The shared `refreshPromise` correctly deduplicates concurrent refresh attempts across both.
-async function handle401Error(error: AxiosError, retryWith: typeof api | typeof axios): Promise<unknown> {
+async function handleResponseError(error: AxiosError, retryWith: typeof api | typeof axios): Promise<unknown> {
   const status = error.response?.status;
   const originalRequest = error.config as InternalAxiosRequestConfig & { _retried?: boolean };
 
@@ -275,6 +334,14 @@ async function handle401Error(error: AxiosError, retryWith: typeof api | typeof 
     // normal API-error toast (not a "you're logged out" experience).
   }
 
+  // Network blip / 5xx on a safe-to-repeat GET → backoff retry. Returns
+  // null when the request is non-idempotent or retries are exhausted,
+  // in which case we fall through to the normal log+reject below.
+  if (isTransientError(error)) {
+    const scheduled = scheduleTransientRetry(error, retryWith);
+    if (scheduled) return scheduled;
+  }
+
   // req_id from the response header (or the request header if the server
   // never replied). With this on the error line, a support engineer can grep
   // it directly in backend.log via the admin Logs viewer.
@@ -286,17 +353,17 @@ async function handle401Error(error: AxiosError, retryWith: typeof api | typeof 
   return Promise.reject(error);
 }
 
-// Response interceptor: auto-refresh expired tokens, log other errors
+// Response interceptor: auto-refresh expired tokens, retry transient GETs, log other errors
 api.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => handle401Error(error, api)
+  (error: AxiosError) => handleResponseError(error, api)
 );
 
 // Also cover the 22+ files that use the global `axios` instance directly
 // (studio APIs, chats, sources, settings, etc.)
 axios.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => handle401Error(error, axios)
+  (error: AxiosError) => handleResponseError(error, axios)
 );
 
 /**

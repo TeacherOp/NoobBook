@@ -58,6 +58,12 @@ export const ProjectList: React.FC<ProjectListProps> = ({
     return [...projects].sort((a, b) => tsOf(b) - tsOf(a));
   }, [projects]);
   const [loading, setLoading] = useState(true);
+  // Switches the loading caption from "Loading projects..." to "Reconnecting…"
+  // after 3s. The api-client interceptor silently retries transient GET
+  // failures (network / 502 / 503 / 504) up to 3 times at 1s/2s/4s — so a
+  // deploy cutover stretches this load to ~7s and "Reconnecting…" tells the
+  // user we know about it instead of showing nothing then a red error.
+  const [reconnecting, setReconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
@@ -69,15 +75,20 @@ export const ProjectList: React.FC<ProjectListProps> = ({
   }, [refreshTrigger]); // Re-fetch when refreshTrigger changes
 
   const loadProjects = async () => {
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     try {
       setLoading(true);
       setError(null);
+      setReconnecting(false);
+      reconnectTimer = setTimeout(() => setReconnecting(true), 3000);
       const response = await projectsAPI.list();
       setProjects(response.data.projects || []);
     } catch (err) {
       setError('Failed to load projects');
       log.error({ err }, 'failed to load projects');
     } finally {
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      setReconnecting(false);
       setLoading(false);
     }
   };
@@ -129,7 +140,9 @@ export const ProjectList: React.FC<ProjectListProps> = ({
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
-          <p className="mt-4 text-muted-foreground">Loading projects...</p>
+          <p className="mt-4 text-muted-foreground">
+            {reconnecting ? 'Reconnecting…' : 'Loading projects...'}
+          </p>
         </div>
       </div>
     );

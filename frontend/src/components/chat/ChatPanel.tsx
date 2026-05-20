@@ -697,14 +697,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       // Some SSE producers occasionally emit a `user_message` event with a
       // missing/null payload during reconnects. We can't insert `undefined`
       // into activeChat.messages (the renderer would crash), but we also
-      // mustn't silently return — that would leave the optimistic temp
-      // message exposed to the `appendAssistantMessage` filter, which would
-      // then strip it and leave the chat showing the AI's reply with no
-      // user bubble above it (the screenshot-attachment regression).
-      // Instead, mark the temp message as "soft canonical": flip the
-      // received flag and keep the temp in place. The 500ms post-stream
-      // recover refetch (recoverChatFromServer) will swap it for the real
-      // canonical from the DB.
+      // mustn't silently return AND flip canonicalUserMessageReceivedRef —
+      // `appendAssistantMessage` reads that flag and strips the temp when
+      // it's true, which would reintroduce the missing-user-bubble
+      // regression. Instead: log and bail, leaving the flag false so
+      // `tempStillSole` in appendAssistantMessage stays true and the
+      // optimistic bubble survives until the 500ms recover refetch
+      // replaces it with the canonical (and mergeChatPreservingLocal
+      // strips the temp- id out of the merge result).
       if (!canonicalUserMessage?.id) {
         log.warn(
           {
@@ -714,7 +714,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
           },
           'user_message event arrived without an id — keeping temp bubble',
         );
-        canonicalUserMessageReceivedRef.current = true;
         return;
       }
       canonicalUserMessageReceivedRef.current = true;

@@ -683,10 +683,28 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
 
     const replaceTempWithCanonicalUser = (canonicalUserMessage: Chat['messages'][number]) => {
       // Some SSE producers occasionally emit a `user_message` event with a
-      // missing/null payload during reconnects. Bail out instead of poisoning
-      // activeChat.messages with `undefined`, which crashes the renderer
-      // (`Cannot read properties of undefined (reading 'id')`).
-      if (!canonicalUserMessage?.id) return;
+      // missing/null payload during reconnects. We can't insert `undefined`
+      // into activeChat.messages (the renderer would crash), but we also
+      // mustn't silently return — that would leave the optimistic temp
+      // message exposed to the `appendAssistantMessage` filter, which would
+      // then strip it and leave the chat showing the AI's reply with no
+      // user bubble above it (the screenshot-attachment regression).
+      // Instead, mark the temp message as "soft canonical": flip the
+      // received flag and keep the temp in place. The 500ms post-stream
+      // recover refetch (recoverChatFromServer) will swap it for the real
+      // canonical from the DB.
+      if (!canonicalUserMessage?.id) {
+        log.warn(
+          {
+            chatId: sendingChatId,
+            tempId: tempUserMessage.id,
+            hadAttachments: messageAttachments.length > 0,
+          },
+          'user_message event arrived without an id — keeping temp bubble',
+        );
+        canonicalUserMessageReceivedRef.current = true;
+        return;
+      }
       canonicalUserMessageReceivedRef.current = true;
       // Carry the optimistic blob URLs onto the canonical message's image
       // blocks. The server-signed URLs aren't always reachable from the
@@ -761,7 +779,27 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       // bubble nor the final message is visible.
       setActiveChat((prev) => {
         if (!prev) return null;
-        const messagesWithoutTemp = prev.messages.filter((m) => m.id !== tempUserMessage.id);
+        // Only strip the optimistic temp message if a canonical user
+        // message is already present in the array. Without this guard,
+        // a missed/empty `user_message` SSE event lets us drop the user
+        // bubble entirely — the chat then shows only the AI reply with
+        // nothing above it (the screenshot-attachment regression). If
+        // the temp is still the only user-side representation, keep it;
+        // the post-stream recover refetch will reconcile it with the DB.
+        const tempStillSole = !canonicalUserMessageReceivedRef.current;
+        const messagesWithoutTemp = tempStillSole
+          ? prev.messages
+          : prev.messages.filter((m) => m.id !== tempUserMessage.id);
+        if (tempStillSole) {
+          log.warn(
+            {
+              chatId: prev.id,
+              assistantId: assistantMessage.id,
+              tempId: tempUserMessage.id,
+            },
+            'assistant arrived before canonical user_message — preserving temp bubble',
+          );
+        }
         const alreadyAppended = messagesWithoutTemp.some((msg) => msg.id === assistantMessage.id);
         if (import.meta.env.DEV) {
           log.info(

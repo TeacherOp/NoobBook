@@ -495,6 +495,33 @@ class MainChatService:
 
         # Step 1: Store user message
         user_msg = message_service.add_user_message(project_id, chat_id, user_message_text)
+        # Diagnostic: if the persisted message is missing an `id` or has an
+        # empty content, the frontend will receive a malformed `user_message`
+        # SSE event and fall back to its temp-preservation path. We log it
+        # here so prod logs surface the regression instead of just the
+        # symptom (a missing user bubble in the chat view).
+        if not user_msg or not user_msg.get("id"):
+            logger.warning(
+                "user_message emit: malformed payload chat_id=%s has_msg=%s has_id=%s",
+                chat_id,
+                bool(user_msg),
+                bool(user_msg and user_msg.get("id")),
+            )
+        else:
+            persisted_content = user_msg.get("content")
+            content_type = type(persisted_content).__name__
+            block_count = (
+                len(persisted_content)
+                if isinstance(persisted_content, list)
+                else None
+            )
+            logger.info(
+                "user_message emit: chat_id=%s msg_id=%s content_type=%s block_count=%s",
+                chat_id,
+                user_msg.get("id"),
+                content_type,
+                block_count,
+            )
         self._emit_event(on_event, "user_message", user_msg)
 
         # Step 2: Get config and build system prompt

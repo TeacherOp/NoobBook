@@ -206,6 +206,18 @@ class MessageService:
 
         if has_image_blocks:
             text_content = self._format_blocks_with_images(content)
+            # Defence in depth: if every block was filtered out (e.g.
+            # storage signing failed for every image AND there was no
+            # text block), the frontend renderer would receive an empty
+            # list and the user bubble would render as an empty pill.
+            # Log loudly so the regression is observable instead of
+            # silent.
+            if not text_content:
+                logger.warning(
+                    "format_message: image-containing message %s reduced to empty block list — "
+                    "signed-URL signing likely failed for every attachment",
+                    message.get("id"),
+                )
         elif isinstance(content, dict) and "text" in content:
             text_content = content["text"]
         elif isinstance(content, str):

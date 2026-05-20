@@ -55,6 +55,7 @@ from app.services.tool_executors import memory_executor
 from app.services.tool_executors import csv_analyzer_agent_executor
 from app.services.tool_executors import database_analyzer_agent_executor
 from app.services.tool_executors import freshdesk_analyzer_agent_executor
+from app.services.tool_executors import mixpanel_analyzer_agent_executor
 from app.services.tool_executors import studio_signal_executor
 from app.services.integrations.knowledge_bases import knowledge_base_service
 from app.services.integrations.mcp.mcp_tool_service import mcp_tool_service
@@ -100,6 +101,7 @@ class MainChatService:
         self._csv_analyzer_tool = None
         self._database_analyzer_tool = None
         self._freshdesk_analyzer_tool = None
+        self._mixpanel_analyzer_tool = None
         self._studio_signal_tool = None
 
     def _get_search_tool(self) -> Dict[str, Any]:
@@ -135,6 +137,14 @@ class MainChatService:
                 "chat_tools", "analyze_freshdesk_agent_tool"
             )
         return self._freshdesk_analyzer_tool
+
+    def _get_mixpanel_analyzer_tool(self) -> Dict[str, Any]:
+        """Load the analyze_mixpanel_agent tool definition (cached)."""
+        if self._mixpanel_analyzer_tool is None:
+            self._mixpanel_analyzer_tool = tool_loader.load_tool(
+                "chat_tools", "analyze_mixpanel_agent_tool"
+            )
+        return self._mixpanel_analyzer_tool
 
     def _get_studio_signal_tool(self) -> Dict[str, Any]:
         """Load the studio_signal tool definition (cached)."""
@@ -201,9 +211,14 @@ class MainChatService:
         if has_jira_sources and (not user_id or user_has_permission(user_id, "data_sources", "jira")):
             tools.extend(knowledge_base_service.get_jira_tools())
 
-        # Add Mixpanel tools only when the project has a .mixpanel source (project-scoped)
+        # Mixpanel analyzer agent for product-usage questions (project-scoped).
+        # The 7 raw Mixpanel tools now live agent-internal under
+        # backend/app/services/tools/mixpanel_agent/ and are loaded by
+        # mixpanel_analyzer_agent.run() — only the trigger tool is exposed
+        # to the main chat so the surface stays small and consistent with
+        # the Freshdesk pattern.
         if has_mixpanel_sources and (not user_id or user_has_permission(user_id, "data_sources", "mixpanel")):
-            tools.extend(knowledge_base_service.get_mixpanel_tools())
+            tools.append(self._get_mixpanel_analyzer_tool())
 
         # Add non-Jira knowledge base tools (Notion, GitHub, etc.) — always global
         tools.extend(knowledge_base_service.get_available_tools())
@@ -339,6 +354,21 @@ class MainChatService:
         elif tool_name == "analyze_freshdesk_agent":
             # Freshdesk analyzer agent for answering questions about ticket data
             result = freshdesk_analyzer_agent_executor.execute(
+                project_id=project_id,
+                source_id=tool_input.get("source_id", ""),
+                query=tool_input.get("query", ""),
+                chat_id=chat_id,
+                user_id=user_id,
+                on_event=on_event,
+            )
+            if result.get("success"):
+                return result.get("content", "No analysis result")
+            else:
+                return f"Error: {result.get('error', 'Analysis failed')}"
+
+        elif tool_name == "analyze_mixpanel_agent":
+            # Mixpanel analyzer agent for product-usage questions
+            result = mixpanel_analyzer_agent_executor.execute(
                 project_id=project_id,
                 source_id=tool_input.get("source_id", ""),
                 query=tool_input.get("query", ""),

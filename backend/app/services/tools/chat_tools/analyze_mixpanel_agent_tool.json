@@ -1,0 +1,21 @@
+{
+    "name": "analyze_mixpanel_agent",
+    "description": "Trigger a Mixpanel analytics agent for product-usage questions. Use this for any question about event counts, conversion funnels, retention, segmentation, or cohort behaviour against the connected Mixpanel project. The agent handles its own tool selection (list events, query events, segmentation, funnels, retention, cohort path analysis) and returns a structured answer.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "source_id": {
+                "type": "string",
+                "description": "The MIXPANEL source ID for this project."
+            },
+            "query": {
+                "type": "string",
+                "description": "Question about product usage / Mixpanel data. Include any dates, event names, or filters the user mentioned."
+            }
+        },
+        "required": [
+            "source_id",
+            "query"
+        ]
+    }
+}

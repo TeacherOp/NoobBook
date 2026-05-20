@@ -9,12 +9,10 @@ base tools (Jira, Notion, GitHub, etc.). It handles:
 
 This keeps main_chat_service.py clean by centralizing all KB integration logic.
 """
-from datetime import date, timedelta
-from typing import Dict, Any, List, Callable, Tuple
+from typing import Dict, Any, List, Callable
 
 from app.config import tool_loader
 from app.services.integrations.knowledge_bases.jira import jira_service
-from app.services.integrations.knowledge_bases.mixpanel import mixpanel_service
 from app.services.integrations.knowledge_bases.notion import notion_service
 
 
@@ -32,17 +30,12 @@ class KnowledgeBaseService:
     main_chat_service.py.
     """
 
-    # Tool name prefixes for routing
+    # Tool name prefixes for routing.
+    # Mixpanel tools are NOT listed here — they live agent-internal under
+    # backend/app/services/tools/mixpanel_agent/ and are dispatched by
+    # mixpanel_analyzer_agent.run(). The main chat only sees the
+    # analyze_mixpanel_agent trigger tool.
     JIRA_TOOLS = ["jira_list_projects", "jira_search_issues", "jira_get_issue", "jira_get_project"]
-    MIXPANEL_TOOLS = [
-        "mixpanel_list_events",
-        "mixpanel_query_events",
-        "mixpanel_segmentation",
-        "mixpanel_list_funnels",
-        "mixpanel_query_funnel",
-        "mixpanel_retention",
-        "mixpanel_events_after",
-    ]
     NOTION_TOOLS = ["notion_search", "notion_read_page", "notion_get_database_schema", "notion_query_database"]
     GITHUB_TOOLS = []  # Future: ["github_search_prs", "github_get_issue", ...]
 
@@ -59,14 +52,6 @@ class KnowledgeBaseService:
             "jira_search_issues": self._execute_jira_search_issues,
             "jira_get_issue": self._execute_jira_get_issue,
             "jira_get_project": self._execute_jira_get_project,
-            # Mixpanel tools
-            "mixpanel_list_events": self._execute_mixpanel_list_events,
-            "mixpanel_query_events": self._execute_mixpanel_query_events,
-            "mixpanel_segmentation": self._execute_mixpanel_segmentation,
-            "mixpanel_list_funnels": self._execute_mixpanel_list_funnels,
-            "mixpanel_query_funnel": self._execute_mixpanel_query_funnel,
-            "mixpanel_retention": self._execute_mixpanel_retention,
-            "mixpanel_events_after": self._execute_mixpanel_events_after,
             # Notion tools
             "notion_search": self._execute_notion_search,
             "notion_read_page": self._execute_notion_read_page,
@@ -123,21 +108,6 @@ class KnowledgeBaseService:
         """
         if jira_service.is_configured():
             return [self._get_tool(name) for name in self.JIRA_TOOLS]
-        return []
-
-    def get_mixpanel_tools(self) -> List[Dict[str, Any]]:
-        """
-        Get Mixpanel-specific tools if Mixpanel is configured.
-
-        Educational Note: Mirrors get_jira_tools — project-scoped. Tools are
-        only added to the chat tool list when the project has an active
-        .mixpanel source flag.
-
-        Returns:
-            List of Mixpanel tool definitions, or empty list if not configured
-        """
-        if mixpanel_service.is_configured():
-            return [self._get_tool(name) for name in self.MIXPANEL_TOOLS]
         return []
 
     def can_handle(self, tool_name: str) -> bool:
@@ -341,196 +311,6 @@ class KnowledgeBaseService:
                 lines.append("")
 
         return "\n".join(lines)
-
-    # --- Mixpanel formatters ---
-
-    @staticmethod
-    def _default_date_window(tool_input: Dict[str, Any]) -> Tuple[str, str]:
-        # Mixpanel Query API requires from_date/to_date. Fall back to yesterday→today
-        # so a call still succeeds if the user (and Claude) didn't specify a window.
-        today = date.today()
-        yesterday = today - timedelta(days=1)
-        from_date = tool_input.get("from_date") or yesterday.isoformat()
-        to_date = tool_input.get("to_date") or today.isoformat()
-        # Guard against an inverted window when only one side is user-supplied
-        # (e.g. to_date="2025-01-01" + default from_date=yesterday).
-        if from_date > to_date:
-            from_date = to_date
-        return from_date, to_date
-
-    def _execute_mixpanel_list_events(self, tool_input: Dict[str, Any]) -> str:
-        """List tracked event names."""
-        limit = tool_input.get("limit", 100)
-        result = mixpanel_service.list_events(limit=limit)
-        if not result["success"]:
-            return f"Error: {result.get('error', 'Unknown error')}"
-
-        events = result.get("events", [])
-        lines = [f"Found {result['total']} tracked event(s) in Mixpanel:", ""]
-        if not events:
-            lines.append("No events tracked yet.")
-        else:
-            for name in events:
-                lines.append(f"- {name}")
-        return "\n".join(lines)
-
-    def _execute_mixpanel_query_events(self, tool_input: Dict[str, Any]) -> str:
-        """Event counts over time."""
-        event_names = tool_input.get("event_names") or []
-        from_date, to_date = self._default_date_window(tool_input)
-        unit = tool_input.get("unit", "day")
-
-        result = mixpanel_service.query_events(
-            event_names=event_names,
-            from_date=from_date,
-            to_date=to_date,
-            unit=unit,
-        )
-        if not result["success"]:
-            return f"Error: {result.get('error', 'Unknown error')}"
-        return self._format_mixpanel_data(result.get("data"), title=f"Event counts ({unit}, {from_date} → {to_date})")
-
-    def _execute_mixpanel_segmentation(self, tool_input: Dict[str, Any]) -> str:
-        """Segmented event counts."""
-        event = tool_input.get("event")
-        from_date, to_date = self._default_date_window(tool_input)
-        on = tool_input.get("on")
-        where = tool_input.get("where")
-        unit = tool_input.get("unit", "day")
-
-        result = mixpanel_service.segmentation(
-            event=event, from_date=from_date, to_date=to_date,
-            on=on, where=where, unit=unit,
-        )
-        if not result["success"]:
-            return f"Error: {result.get('error', 'Unknown error')}"
-        return self._format_mixpanel_data(
-            result.get("data"),
-            title=f"Segmentation of {event} by {on or '(none)'} ({from_date} → {to_date})",
-        )
-
-    def _execute_mixpanel_list_funnels(self, tool_input: Dict[str, Any]) -> str:
-        """List funnels."""
-        result = mixpanel_service.list_funnels()
-        if not result["success"]:
-            return f"Error: {result.get('error', 'Unknown error')}"
-
-        funnels = result.get("funnels", [])
-        lines = [f"Found {result['total']} funnel(s):", ""]
-        if not funnels:
-            lines.append("No funnels configured in Mixpanel.")
-        else:
-            for f in funnels:
-                lines.append(f"- **{f.get('name', '(unnamed)')}** (funnel_id: {f.get('funnel_id')})")
-        return "\n".join(lines)
-
-    def _execute_mixpanel_query_funnel(self, tool_input: Dict[str, Any]) -> str:
-        """Funnel conversion."""
-        funnel_id = tool_input.get("funnel_id")
-        from_date, to_date = self._default_date_window(tool_input)
-        unit = tool_input.get("unit", "day")
-
-        result = mixpanel_service.query_funnel(
-            funnel_id=funnel_id, from_date=from_date, to_date=to_date, unit=unit,
-        )
-        if not result["success"]:
-            return f"Error: {result.get('error', 'Unknown error')}"
-        return self._format_mixpanel_data(
-            result.get("data"),
-            title=f"Funnel {funnel_id} ({unit}, {from_date} → {to_date})",
-        )
-
-    def _execute_mixpanel_retention(self, tool_input: Dict[str, Any]) -> str:
-        """Retention analysis."""
-        born_event = tool_input.get("born_event")
-        event = tool_input.get("event")
-        from_date, to_date = self._default_date_window(tool_input)
-        retention_type = tool_input.get("retention_type", "birth")
-        unit = tool_input.get("unit", "day")
-
-        result = mixpanel_service.retention(
-            born_event=born_event, event=event,
-            from_date=from_date, to_date=to_date,
-            retention_type=retention_type, unit=unit,
-        )
-        if not result["success"]:
-            return f"Error: {result.get('error', 'Unknown error')}"
-        return self._format_mixpanel_data(
-            result.get("data"),
-            title=f"Retention: {born_event} → {event or '(any)'} ({retention_type}, {unit})",
-        )
-
-    def _execute_mixpanel_events_after(self, tool_input: Dict[str, Any]) -> str:
-        """Cohort path analysis — top events users fire after a trigger event."""
-        trigger_event = tool_input.get("trigger_event")
-        if not trigger_event:
-            return "Error: trigger_event is required."
-        from_date, to_date = self._default_date_window(tool_input)
-        window_hours = tool_input.get("window_hours", 168)
-        top_n = tool_input.get("top_n", 20)
-        exclude_trigger = tool_input.get("exclude_trigger", True)
-
-        result = mixpanel_service.events_after(
-            trigger_event=trigger_event,
-            from_date=from_date,
-            to_date=to_date,
-            window_hours=window_hours,
-            top_n=top_n,
-            exclude_trigger=exclude_trigger,
-        )
-        if not result["success"]:
-            return f"Error: {result.get('error', 'Unknown error')}"
-
-        # Render as a markdown ranked list — Claude reads markdown lists more
-        # cleanly than nested JSON for "top N" questions, and this output is
-        # what the user ultimately sees. Mirrors the list-funnel formatter.
-        data = result["data"]
-        cohort_size = data["cohort_size"]
-        top_events = data["top_events"]
-        days = round(window_hours / 24, 1)
-
-        if cohort_size == 0:
-            return (
-                f"No users fired \"{trigger_event}\" between {from_date} and {to_date}. "
-                "Try widening the date range or check the event name spelling."
-            )
-
-        lines = [
-            f"Cohort: {cohort_size:,} users fired \"{trigger_event}\" between "
-            f"{from_date} and {to_date}",
-            f"Top events fired in the next {days} day(s):",
-            "",
-        ]
-        if not top_events:
-            lines.append("(cohort users fired no other events in the window)")
-        else:
-            for i, row in enumerate(top_events, 1):
-                lines.append(
-                    f"{i}. **{row['event']}** — "
-                    f"{row['users']:,} users ({row['pct_of_cohort']}%)"
-                )
-        return "\n".join(lines)
-
-    @staticmethod
-    def _format_mixpanel_data(data: Any, title: str) -> str:
-        """
-        Render Mixpanel Query API payload as a compact JSON block Claude can reason over.
-
-        Educational Note: Mixpanel responses have several shapes (events dict,
-        segmentation nested dict, funnels list). Rather than hand-format each,
-        we emit JSON inside a fenced block — Claude's strong at parsing JSON.
-        """
-        import json as _json
-        try:
-            rendered = _json.dumps(data, indent=2, default=str)
-        except Exception:
-            rendered = str(data)
-
-        # Keep the block small — truncate huge payloads to protect context window
-        if len(rendered) > 15000:
-            rendered = rendered[:15000] + "\n... (truncated)"
-
-        return f"## {title}\n\n```json\n{rendered}\n```"
 
     # --- Notion formatters ---
 

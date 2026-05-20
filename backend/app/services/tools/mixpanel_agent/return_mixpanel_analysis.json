@@ -1,0 +1,31 @@
+{
+    "name": "return_mixpanel_analysis",
+    "description": "Return the final Mixpanel analysis with a plain-text summary plus structured findings and recommendations. Call this exactly once when you have enough data to answer the user's question — this terminates the agent loop.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {
+                "type": "string",
+                "description": "Direct answer to the user's question. State the date window and any caveats. If the data was sparse or zero, say so plainly — do NOT invent trends."
+            },
+            "findings": {
+                "type": "array",
+                "items": {
+                    "type": "string"
+                },
+                "description": "Concrete observations from the data — counts, percentages, top values. Each item is one bullet."
+            },
+            "recommendations": {
+                "type": "array",
+                "items": {
+                    "type": "string"
+                },
+                "description": "Optional next-step ideas the user might want to act on. Leave empty if the question is purely descriptive."
+            }
+        },
+        "required": [
+            "summary",
+            "findings"
+        ]
+    }
+}

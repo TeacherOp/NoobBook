@@ -55,6 +55,7 @@ PROMPT_REFERENCED_BY: Dict[str, List[str]] = {
     "csv_analyzer_agent": ["app/services/ai_agents/csv_analyzer_agent.py"],
     "database_analyzer_agent": ["app/services/ai_agents/database_analyzer_agent.py"],
     "freshdesk_analyzer_agent": ["app/services/ai_agents/freshdesk_analyzer_agent.py"],
+    "mixpanel_analyzer_agent": ["app/services/ai_agents/mixpanel_analyzer_agent.py"],
     "deep_research_agent": ["app/services/ai_agents/deep_research_agent.py"],
     "web_agent": ["app/services/ai_agents/web_agent_service.py"],
 }

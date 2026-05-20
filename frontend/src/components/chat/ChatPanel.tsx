@@ -176,7 +176,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       const serverIds = new Set(
         server.messages.map((m) => m.id).filter((id): id is string => Boolean(id)),
       );
-      const localOnly = local.messages.filter((m) => m.id && !serverIds.has(m.id));
+      // `temp-…` IDs are inherently optimistic — they never have a
+      // canonical counterpart on the server, so blindly treating them as
+      // "local only" causes them to leak through every recovery fetch.
+      // Specifically, the soft-canonical preservation path (introduced
+      // for the screenshot-attachment regression) keeps a temp user
+      // message in `prev.messages` when the `user_message` SSE event
+      // arrives without an id. The 500ms post-stream recover refetch
+      // then re-appends that temp below the assistant message, producing
+      // a ghost user bubble. Strip them here so the server view stays
+      // authoritative.
+      const localOnly = local.messages.filter(
+        (m) => m.id && !m.id.startsWith('temp-') && !serverIds.has(m.id),
+      );
       if (localOnly.length === 0) return server;
       if (import.meta.env.DEV) {
         log.info(

@@ -37,8 +37,13 @@ def _rewrite_signed_url_for_browser(signed_url: Optional[str]) -> Optional[str]:
        reached us at that origin — and our nginx config proxies
        ``/storage/*`` to Kong on the same origin, so the same host serves
        both API and storage. No config required.
-    2. ``SUPABASE_PUBLIC_URL`` env var, for callers outside the request
-       context (background jobs, CLI tasks).
+    2. ``SUPABASE_PUBLIC_URL`` env var. Used both (a) for callers outside
+       the request context (background jobs, CLI tasks) AND (b) when
+       the request handler ran behind a reverse proxy that didn't
+       forward the original Host header — Coolify / Docker compose hit
+       the backend with ``Host: kong:8000``, which equals the internal
+       URL and would otherwise leave the signed URL pointing at an
+       unreachable Docker hostname.
 
     No-op when the URL doesn't start with the internal host (already
     public) — keeps local dev, where ``SUPABASE_URL=http://localhost:8000``
@@ -46,7 +51,7 @@ def _rewrite_signed_url_for_browser(signed_url: Optional[str]) -> Optional[str]:
     """
     if not signed_url:
         return signed_url
-    internal = os.getenv("SUPABASE_URL")
+    internal = (os.getenv("SUPABASE_URL") or "").rstrip("/")
     if not internal or not signed_url.startswith(internal):
         return signed_url
 
@@ -57,7 +62,23 @@ def _rewrite_signed_url_for_browser(signed_url: Optional[str]) -> Optional[str]:
         from flask import request, has_request_context
 
         if has_request_context():
-            public = (request.host_url or "").rstrip("/")
+            # Prefer X-Forwarded-Host (set by the public-edge proxy) over
+            # request.host_url, because Coolify / docker-compose chain
+            # rewrites Host to the immediate upstream (kong) and that
+            # equals the internal URL — useless for browser rewriting.
+            forwarded_host = request.headers.get("X-Forwarded-Host")
+            forwarded_proto = request.headers.get(
+                "X-Forwarded-Proto", request.scheme or "https"
+            )
+            if forwarded_host:
+                public = f"{forwarded_proto}://{forwarded_host}".rstrip("/")
+            else:
+                candidate = (request.host_url or "").rstrip("/")
+                # Reject the candidate if it resolves to the internal
+                # host — that's the Coolify/Docker case where the inner
+                # proxy already terminated the original Host header.
+                if candidate and candidate != internal:
+                    public = candidate
     except Exception:  # pragma: no cover — defensive
         public = None
 

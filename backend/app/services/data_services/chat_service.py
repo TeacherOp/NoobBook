@@ -135,6 +135,19 @@ class ChatService:
         return chats
 
     @staticmethod
+    def _content_has_tool_block(content: List[Dict[str, Any]]) -> bool:
+        """True if a list-content message includes any tool_use / tool_result
+        block — i.e. it's a Claude tool-chain intermediate, not user-visible.
+
+        Centralized so the two call sites (`_is_displayable_message` and the
+        transcript filter in `get_chat`) can't drift if the tool block types
+        ever change."""
+        return any(
+            isinstance(b, dict) and b.get("type") in ("tool_use", "tool_result")
+            for b in content
+        )
+
+    @staticmethod
     def _is_displayable_message(msg: Dict[str, Any]) -> bool:
         """
         True if a message row should appear in the user-visible chat
@@ -155,11 +168,7 @@ class ChatService:
         #      displayable.
         # Distinguish by inspecting the block types.
         if isinstance(content, list):
-            has_tool_block = any(
-                isinstance(b, dict) and b.get("type") in ("tool_use", "tool_result")
-                for b in content
-            )
-            if has_tool_block:
+            if ChatService._content_has_tool_block(content):
                 return False
             has_image = any(
                 isinstance(b, dict) and b.get("type") == "image"
@@ -345,11 +354,7 @@ class ChatService:
                 # (keep — the formatter re-signs storage URLs and projects
                 # the block list down to the frontend shape).
                 if isinstance(content, list):
-                    has_tool_block = any(
-                        isinstance(b, dict) and b.get("type") in ("tool_use", "tool_result")
-                        for b in content
-                    )
-                    if has_tool_block:
+                    if ChatService._content_has_tool_block(content):
                         continue
                     # Lazy import: message_service depends on storage_service
                     # and storage_service depends on supabase client, so a

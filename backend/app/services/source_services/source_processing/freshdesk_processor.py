@@ -117,7 +117,7 @@ def process_freshdesk(
     embedding_info = source.get("embedding_info", {}) or {}
     raw_meta = _load_raw_metadata(raw_file_path)
 
-    days_back = embedding_info.get("days_back") or raw_meta.get("days_back") or 30
+    days_back = embedding_info.get("days_back") or raw_meta.get("days_back") or 90
 
     # Step 1: Check if global tickets already exist (skip sync if so)
     existing_stats = freshdesk_sync_service.get_sync_stats()

@@ -81,7 +81,7 @@ export const FreshdeskTab: React.FC<FreshdeskTabProps> = ({ isAtLimit, onAddFres
       </Button>
 
       <p className="text-xs text-muted-foreground">
-        NoobBook will sync the last 30 days of tickets, generate a summary, and enable SQL-based ticket analysis in chat.
+        NoobBook will sync the last 90 days of tickets, generate a summary, and enable SQL-based ticket analysis in chat.
       </p>
     </div>
   );

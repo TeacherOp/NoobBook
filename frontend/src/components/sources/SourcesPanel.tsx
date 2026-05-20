@@ -509,7 +509,7 @@ export const SourcesPanel: React.FC<SourcesPanelProps> = ({
     try {
       const created = await sourcesAPI.addFreshdeskSource(projectId, name, description);
       setSources((prev) => upsertOne(prev, { ...created, active: selectedSourceIdsRef.current.includes(created.id) }, { prepend: true }));
-      success('Freshdesk sync started — fetching last 30 days of tickets. Check the status bar for progress.');
+      success('Freshdesk sync started — fetching last 90 days of tickets. Check the status bar for progress.');
       setSheetOpen(false);
     } catch (err: unknown) {
       log.error({ err }, 'failed to add Freshdesk source');

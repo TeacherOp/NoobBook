@@ -440,7 +440,7 @@ def sync_freshdesk_source(project_id: str, source_id: str):
 
 @sources_bp.route('/projects/<project_id>/sources/<source_id>/freshdesk-backfill', methods=['POST'])
 def backfill_freshdesk_source(project_id: str, source_id: str):
-    """Clear all tickets and re-fetch last 30 days as a background task."""
+    """Clear all tickets and re-fetch last 90 days as a background task."""
     try:
         from app.services.integrations.freshdesk.freshdesk_service import freshdesk_service
         if not freshdesk_service.is_configured():
@@ -451,7 +451,7 @@ def backfill_freshdesk_source(project_id: str, source_id: str):
         task_service.submit_task(
             "freshdesk_backfill", source_id,
             _run_freshdesk_sync,
-            project_id, source_id, "backfill", 30, True,
+            project_id, source_id, "backfill", 90, True,
         )
 
         return jsonify({

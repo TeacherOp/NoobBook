@@ -27,7 +27,7 @@ def add_freshdesk_source(
     project_id: str,
     name: Optional[str] = None,
     description: str = "",
-    days_back: int = 30,
+    days_back: int = 90,
 ) -> Dict[str, Any]:
     """
     Create a FRESHDESK source in a project and trigger processing.

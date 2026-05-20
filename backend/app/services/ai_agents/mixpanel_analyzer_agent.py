@@ -25,6 +25,13 @@ class MixpanelAnalyzerAgent:
     AGENT_NAME = "mixpanel_analyzer_agent"
     MAX_ITERATIONS = 40
     TERMINATION_TOOL = "return_mixpanel_analysis"
+    # Cap each tool_result payload sent back to Claude so a single noisy
+    # call (long-window query_events, large segmentation, or the heavy
+    # events_after /export cohort) can't blow the context window or
+    # spike per-iteration cost. The old _format_mixpanel_data helper in
+    # knowledge_base_service used the same 15000-char limit; we preserve
+    # it here now that the agent owns the serialization step.
+    MAX_TOOL_RESULT_CHARS = 15_000
 
     def __init__(self):
         self._tools: Optional[List[Dict[str, Any]]] = None
@@ -50,6 +57,29 @@ class MixpanelAnalyzerAgent:
         if from_date > to_date:
             from_date = to_date
         return from_date, to_date
+
+    @classmethod
+    def _serialize_tool_result(cls, result: Any) -> str:
+        """JSON-encode a tool result, truncating with a marker if it
+        exceeds MAX_TOOL_RESULT_CHARS.
+
+        Mixpanel's Query API can return tens of KB for a long-window
+        query_events call, and events_after's /export pass can return
+        hundreds of KB. Forwarding that verbatim into the next iteration
+        would risk a context-overflow error or sharp cost spikes. We
+        truncate to a fixed character budget and append a visible marker
+        so Claude knows the payload is incomplete and can narrow the
+        next call (date window, top_n, etc.)."""
+        if isinstance(result, dict):
+            try:
+                encoded = json.dumps(result, default=str)
+            except (TypeError, ValueError):
+                encoded = str(result)
+        else:
+            encoded = str(result)
+        if len(encoded) > cls.MAX_TOOL_RESULT_CHARS:
+            return encoded[: cls.MAX_TOOL_RESULT_CHARS] + "\n... (truncated — payload exceeded size cap; narrow the date range, top_n, or property filter)"
+        return encoded
 
     @staticmethod
     def _emit_progress(
@@ -323,7 +353,7 @@ class MixpanelAnalyzerAgent:
                     {
                         "type": "tool_result",
                         "tool_use_id": tool_id,
-                        "content": json.dumps(result) if isinstance(result, dict) else str(result),
+                        "content": self._serialize_tool_result(result),
                     }
                 )
 

@@ -163,7 +163,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
           <p className="text-destructive mb-4">{error}</p>
-          <Button onClick={loadProjects}>Try Again</Button>
+          <Button onClick={() => loadProjects()}>Try Again</Button>
         </div>
       </div>
     );

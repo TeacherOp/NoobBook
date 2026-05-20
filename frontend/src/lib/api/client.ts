@@ -257,7 +257,12 @@ function handlePermanentFailure(): void {
 // Idempotent-only: GET and HEAD. POST/PUT/DELETE may have side effects
 // (created rows, charged tokens, sent emails) so retrying them without
 // an idempotency key would risk duplication. Mutations fail fast.
-const TRANSIENT_STATUSES = new Set([408, 502, 503, 504]);
+// 500 is included because a backend that crashes hard enough to return
+// 500 directly (uncaught Flask exception, brief OOM, restarting worker)
+// is just as transient as the 502/503/504 the proxy returns when the
+// upstream isn't reachable. The 3-retry cap means a permanent 500 (real
+// bug) still surfaces to the user in ~7s.
+const TRANSIENT_STATUSES = new Set([408, 500, 502, 503, 504]);
 const TRANSIENT_MAX_RETRIES = 3;
 const TRANSIENT_BASE_MS = 1000;
 
@@ -295,9 +300,25 @@ function scheduleTransientRetry(
     'transient retry',
   );
   return new Promise((resolve, reject) => {
-    setTimeout(() => {
+    // Honor AbortSignal during the backoff sleep. Without this a caller
+    // that aborts (e.g. component unmount mid-retry) would still wait
+    // out the full 1s/2s/4s and fire one last useless request — quiet,
+    // but it consumes a request slot and adds log noise.
+    const signal = originalRequest.signal as AbortSignal | undefined;
+    if (signal?.aborted) {
+      reject(new axios.CanceledError('Request aborted', undefined, originalRequest));
+      return;
+    }
+    const timer = setTimeout(() => {
       retryWith(originalRequest).then(resolve).catch(reject);
     }, delay);
+    if (signal) {
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(new axios.CanceledError('Request aborted', undefined, originalRequest));
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
   });
 }
 

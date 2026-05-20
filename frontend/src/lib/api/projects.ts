@@ -4,6 +4,7 @@
  * making them easier to use throughout the application and maintaining consistency.
  */
 
+import type { AxiosRequestConfig } from 'axios';
 import { api } from './client';
 
 /**
@@ -51,8 +52,11 @@ export interface CostTracking {
  * Project API Methods
  */
 export const projectsAPI = {
-  // List all projects
-  list: () => api.get('/projects'),
+  // List all projects. Config (e.g. AbortController signal) is forwarded so
+  // callers can cancel an in-flight load — particularly important now that
+  // the api-client interceptor silently retries transient failures for ~7s,
+  // long enough that a user could navigate away mid-retry.
+  list: (config?: AxiosRequestConfig) => api.get('/projects', config),
 
   // Create a new project
   create: (data: { name: string; description?: string }) =>

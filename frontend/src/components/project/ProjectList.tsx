@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import axios from 'axios';
 import { Plus, Trash, Clock, PencilSimple } from '@phosphor-icons/react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
@@ -58,37 +59,46 @@ export const ProjectList: React.FC<ProjectListProps> = ({
     return [...projects].sort((a, b) => tsOf(b) - tsOf(a));
   }, [projects]);
   const [loading, setLoading] = useState(true);
-  // Switches the loading caption from "Loading projects..." to "Reconnecting…"
-  // after 3s. The api-client interceptor silently retries transient GET
-  // failures (network / 502 / 503 / 504) up to 3 times at 1s/2s/4s — so a
-  // deploy cutover stretches this load to ~7s and "Reconnecting…" tells the
-  // user we know about it instead of showing nothing then a red error.
-  const [reconnecting, setReconnecting] = useState(false);
+  // Switches the loading caption to "Still loading…" after 3s. The api-client
+  // interceptor silently retries transient GET failures (network / 500 /
+  // 502 / 503 / 504) up to 3 times at 1s/2s/4s, so a deploy cutover stretches
+  // this load to ~7s. "Still loading…" (not "Reconnecting…") avoids implying
+  // a connection failure on a slow-but-healthy backend.
+  const [slowLoad, setSlowLoad] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
   const [editProject, setEditProject] = useState<{ id: string; name: string; description: string } | null>(null);
 
-  // Fetch projects from API
+  // Fetch projects from API. AbortController-based so that if the user
+  // navigates away during the interceptor's ~7s retry chain, in-flight
+  // requests are cancelled instead of firing setProjects/setError on an
+  // unmounted component.
   useEffect(() => {
-    loadProjects();
+    const controller = new AbortController();
+    loadProjects(controller.signal);
+    return () => controller.abort();
   }, [refreshTrigger]); // Re-fetch when refreshTrigger changes
 
-  const loadProjects = async () => {
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  const loadProjects = async (signal?: AbortSignal) => {
+    let slowLoadTimer: ReturnType<typeof setTimeout> | null = null;
     try {
       setLoading(true);
       setError(null);
-      setReconnecting(false);
-      reconnectTimer = setTimeout(() => setReconnecting(true), 3000);
-      const response = await projectsAPI.list();
+      setSlowLoad(false);
+      slowLoadTimer = setTimeout(() => setSlowLoad(true), 3000);
+      const response = await projectsAPI.list({ signal });
       setProjects(response.data.projects || []);
     } catch (err) {
+      // Component unmount / refreshTrigger change → axios CanceledError. No
+      // user-visible failure happened; just bail out without flipping into
+      // the red error state.
+      if (axios.isCancel(err)) return;
       setError('Failed to load projects');
       log.error({ err }, 'failed to load projects');
     } finally {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      setReconnecting(false);
+      if (slowLoadTimer) clearTimeout(slowLoadTimer);
+      setSlowLoad(false);
       setLoading(false);
     }
   };
@@ -141,7 +151,7 @@ export const ProjectList: React.FC<ProjectListProps> = ({
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto"></div>
           <p className="mt-4 text-muted-foreground">
-            {reconnecting ? 'Reconnecting…' : 'Loading projects...'}
+            {slowLoad ? 'Still loading…' : 'Loading projects...'}
           </p>
         </div>
       </div>

@@ -217,10 +217,16 @@ class FreshdeskService:
                 return {"success": False, "error": f"Freshdesk API error: {response.status_code} - {response.text[:200]}"}
 
         except requests.exceptions.Timeout:
+            # Mirror the JIRA_API / MIXPANEL_API error-path lines so a
+            # network failure mid-sync produces an observable signal in
+            # the bundle, not silence.
+            logger.warning("FRESHDESK_API endpoint=%s error=timeout", endpoint)
             return {"success": False, "error": "Request timed out."}
         except requests.exceptions.ConnectionError:
+            logger.warning("FRESHDESK_API endpoint=%s error=connection", endpoint)
             return {"success": False, "error": "Connection failed. Check FRESHDESK_DOMAIN."}
         except Exception as e:
+            logger.warning("FRESHDESK_API endpoint=%s error=%s", endpoint, type(e).__name__)
             return {"success": False, "error": f"Request failed: {str(e)}"}
 
     def list_tickets(

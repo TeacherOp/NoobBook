@@ -55,11 +55,16 @@ def setup_logging(log_level: str = "DEBUG") -> None:
 
     # The `[req:%(req_id)s]` segment is what makes frontend-↔-backend
     # correlation possible. The matching parser at
-    # `app/api/logs/routes.py:_LINE_RE` accepts both the new and the old
-    # shape so already-rotated archives still display in the admin UI.
+    # `app/api/logs/routes.py:_LINE_RE` accepts both the new ISO-8601
+    # `YYYY-MM-DDTHH:MM:SS` shape *and* the legacy `HH:MM:SS` shape so
+    # already-rotated archives still display in the admin UI. Dates make
+    # multi-day support bundles readable and eliminate the midnight-rollover
+    # heuristic the live tail previously had to lean on. Timezone offset is
+    # intentionally omitted — containers run in UTC and a TZ suffix bloats
+    # every line.
     formatter = logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s [req:%(req_id)s]: %(message)s",
-        datefmt="%H:%M:%S",
+        datefmt="%Y-%m-%dT%H:%M:%S",
     )
 
     req_id_filter = _RequestIdFilter()

@@ -25,21 +25,30 @@ from app.utils import logger as logger_module
 
 logger = logging.getLogger(__name__)
 
-# Two shapes accepted:
-#   - new:  `10:23:44 [ERROR] app.services.foo [req:abc123]: message`
-#   - old:  `10:23:44 [ERROR] app.services.foo: message`        (pre-§1.4 archives)
-# The `[req:...]` group is optional so rotated archives written before the
-# req_id rollout still parse and display correctly in the admin UI.
+# Timestamp shapes accepted (in priority order):
+#   - new (dated): `2026-05-20T10:23:44 [ERROR] app.foo [req:abc]: message`
+#   - legacy:     `10:23:44 [ERROR] app.foo [req:abc]: message`
+#   - oldest:     `10:23:44 [ERROR] app.foo: message`  (pre-req_id archives)
+# The dated form was introduced when multi-day support bundles became
+# unreadable without dates and the live tail's 12-h midnight heuristic
+# became fragile. The legacy shapes are kept so already-rotated archives
+# from before the change still display in the admin UI.
+# The `[req:...]` group is optional for the oldest archives.
 # Loose enough to skip continuation lines (stack-trace inner lines) which we
 # still want to include verbatim.
 _LINE_RE = re.compile(
-    r"^(?P<ts>\d{2}:\d{2}:\d{2})\s+"
+    r"^(?P<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}|\d{2}:\d{2}:\d{2})\s+"
     r"\[(?P<level>[A-Z]+)\]\s+"
     r"(?P<logger>[\w.\-]+)"
     r"(?:\s+\[req:(?P<req_id>[^\]]*)\])?"
     r":\s*"
     r"(?P<message>.*)$"
 )
+
+
+def _is_dated_ts(ts: str) -> bool:
+    """True iff ``ts`` carries the new ``YYYY-MM-DDTHH:MM:SS`` prefix."""
+    return len(ts) >= 10 and ts[4] == "-" and ts[7] == "-"
 
 
 _TAIL_BLOCK_BYTES = 64 * 1024
@@ -57,10 +66,15 @@ _WRAP_TOLERANCE_SECONDS = 12 * 3600
 
 
 def _ts_to_seconds(ts: str) -> Optional[int]:
-    """Parse an ``HH:MM:SS`` string to seconds-since-midnight. Returns
-    ``None`` on malformed input so the caller can fall back to a safe
-    inclusion default (i.e. don't drop the entry just because we
-    couldn't parse its timestamp)."""
+    """Parse an ``HH:MM:SS`` (or trailing portion of ISO-8601) string to
+    seconds-since-midnight. Returns ``None`` on malformed input so the
+    caller can fall back to a safe inclusion default (i.e. don't drop
+    the entry just because we couldn't parse its timestamp)."""
+    # Tolerate a leading "YYYY-MM-DDT" prefix so the legacy seconds-based
+    # compare still works when we have to mix a dated entry with a legacy
+    # cursor (live tail across a deploy boundary).
+    if _is_dated_ts(ts):
+        ts = ts[11:]
     try:
         h_s, m_s, s_s = ts.split(":", 2)
         # The seconds field can carry a trailing fractional component
@@ -71,9 +85,22 @@ def _ts_to_seconds(ts: str) -> Optional[int]:
 
 
 def _ts_strictly_after(ts: str, since: str) -> bool:
-    """Return True iff ``ts`` is newer than ``since``, handling the
-    midnight rollover case where the log format's pure ``HH:MM:SS``
-    timestamp can lexically compare smaller across midnight."""
+    """Return True iff ``ts`` is newer than ``since``.
+
+    Three regimes:
+      1. Both timestamps dated (ISO-8601) → plain lexical compare works
+         because ISO-8601 sorts correctly. No midnight heuristic needed.
+      2. Both timestamps legacy ``HH:MM:SS`` → fall through to the
+         pre-existing seconds-of-day compare with the 12 h wrap tolerance.
+      3. Mixed (one dated + one legacy) → can happen briefly across a
+         deploy boundary when the live tail's `since` cursor predates
+         the format change. Strip both to the time-of-day portion and
+         use the legacy wrap-tolerant compare so we don't black-hole the
+         poll window."""
+    ts_dated = _is_dated_ts(ts)
+    since_dated = _is_dated_ts(since)
+    if ts_dated and since_dated:
+        return ts > since
     if ts > since:
         return True
     ts_secs = _ts_to_seconds(ts)
@@ -345,10 +372,12 @@ def get_recent_logs():
         levels = {"ERROR", "CRITICAL"}
 
     since_raw = (request.args.get("since") or "").strip() or None
-    # Defensive: timestamps in the log file are "HH:MM:SS". Reject
-    # anything that doesn't look that way so a client bug can't slip in
-    # a value that defeats the comparison silently.
-    if since_raw and not re.match(r"^\d{2}:\d{2}:\d{2}", since_raw):
+    # Defensive: accept either the new ISO-8601 ``YYYY-MM-DDTHH:MM:SS``
+    # form or the legacy ``HH:MM:SS`` form. Anything else is dropped so a
+    # client bug can't silently defeat the comparison.
+    if since_raw and not re.match(
+        r"^(?:\d{4}-\d{2}-\d{2}T)?\d{2}:\d{2}:\d{2}", since_raw
+    ):
         since_raw = None
 
     lines = _get_recent_lines(limit, levels, since=since_raw)

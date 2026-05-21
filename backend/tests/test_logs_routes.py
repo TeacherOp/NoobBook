@@ -285,6 +285,69 @@ class TestGetRecentLinesFallback:
         assert logs_routes._get_recent_lines(10, _ERROR_LEVELS) == []
 
 
+class TestDatedTimestamps:
+    """ISO-8601 ``YYYY-MM-DDTHH:MM:SS`` is the new on-disk format. The
+    parser must still accept the legacy ``HH:MM:SS`` shape so rotated
+    archives written before the change still display in the admin UI."""
+
+    def test_line_re_parses_iso8601_timestamp(self):
+        line = (
+            "2026-05-20T14:27:44 [ERROR] app.foo "
+            "[req:abc12345]: something went wrong"
+        )
+        m = logs_routes._LINE_RE.match(line)
+        assert m is not None
+        assert m.group("ts") == "2026-05-20T14:27:44"
+        assert m.group("level") == "ERROR"
+        assert m.group("logger") == "app.foo"
+        assert m.group("req_id") == "abc12345"
+        assert m.group("message") == "something went wrong"
+
+    def test_line_re_still_parses_legacy_hms(self):
+        line = "14:27:44 [ERROR] app.foo [req:abc12345]: legacy archive"
+        m = logs_routes._LINE_RE.match(line)
+        assert m is not None
+        assert m.group("ts") == "14:27:44"
+        assert m.group("message") == "legacy archive"
+
+    def test_strictly_after_with_two_iso8601_no_wrap(self):
+        # Lexical compare on ISO-8601 is correct — no midnight heuristic
+        # needed when both sides carry a date.
+        assert logs_routes._ts_strictly_after(
+            "2026-05-21T00:00:01", "2026-05-20T23:59:55"
+        ) is True
+        assert logs_routes._ts_strictly_after(
+            "2026-05-20T23:59:55", "2026-05-21T00:00:01"
+        ) is False
+
+    def test_strictly_after_mixed_iso_and_legacy(self):
+        # Live tail across a deploy boundary: `since` was captured before
+        # the format change, the next entry arrives in the new format.
+        # Falls back to the wrap-tolerant time-of-day compare.
+        # Dated `ts`, legacy `since` (deploy-boundary cursor) — newer
+        # time-of-day must be treated as newer so the post-deploy entry
+        # isn't black-holed.
+        assert logs_routes._ts_strictly_after(
+            "2026-05-20T10:00:05", "10:00:00"
+        ) is True
+
+    def test_tail_reader_reads_dated_log_file(self, tmp_path):
+        path = tmp_path / "backend.log"
+        _write_log(
+            path,
+            [
+                f"2026-05-20T10:00:00 [ERROR] app.foo [req:r1]: alpha",
+                f"2026-05-20T10:00:01 [ERROR] app.foo [req:r2]: beta",
+            ],
+        )
+        result = logs_routes._tail_lines(path, limit=10, levels=_ERROR_LEVELS)
+        assert [e["ts"] for e in result] == [
+            "2026-05-20T10:00:00",
+            "2026-05-20T10:00:01",
+        ]
+        assert [e["message"] for e in result] == ["alpha", "beta"]
+
+
 class TestReadRecentLinesLegacy:
     """The whole-file fallback should still honour the new ``since`` arg."""
 

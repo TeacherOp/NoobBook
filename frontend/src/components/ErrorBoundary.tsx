@@ -2,6 +2,7 @@ import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { ArrowClockwise, House, Warning } from '@phosphor-icons/react';
 import { Button } from './ui/button';
 import { createLogger } from '@/lib/logger';
+import { errorReporter } from '@/lib/errorReporter';
 
 const log = createLogger('error-boundary');
 
@@ -69,6 +70,18 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo): void {
     log.error({ err: error, componentStack: errorInfo.componentStack }, 'render error caught');
+    // Pipe the render crash into the support bundle. Without this the
+    // boundary's fallback UI is the only artifact a customer can show us;
+    // a "blank panel after I clicked X" report has no way to reach
+    // backend.log otherwise.
+    try {
+      errorReporter.report(
+        `kind=react_render url=${window.location.pathname} message=${error.message || String(error)}`,
+        error,
+      );
+    } catch {
+      /* never let breadcrumb reporting itself crash the boundary */
+    }
   }
 
   componentDidUpdate(prevProps: ErrorBoundaryProps) {

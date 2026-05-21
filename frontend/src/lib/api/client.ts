@@ -10,6 +10,7 @@ import type { InternalAxiosRequestConfig } from 'axios';
 import { getAccessToken, getRefreshToken, setSession, clearSession } from '../auth/session';
 import { notifySessionExpired } from '@/lib/adminMode';
 import { createLogger } from '@/lib/logger';
+import { errorReporter } from '@/lib/errorReporter';
 
 const log = createLogger('api-client');
 
@@ -371,6 +372,36 @@ async function handleResponseError(error: AxiosError, retryWith: typeof api | ty
     || (originalRequest?.headers?.['X-Request-Id'] as string | undefined)
     || '-';
   log.error({ status, reqId, data: error.response?.data }, 'API response error');
+
+  // Breadcrumb the failure into /logs/client so it interleaves with the
+  // backend trace in the support bundle. We only want the bug-class shapes
+  // the bundle can't otherwise see: real network blackouts (no response)
+  // and 5xx (server crashes / proxy timeouts). 4xx is a contract failure
+  // we already surface in the UI — adding it here would be noise.
+  try {
+    const method = (originalRequest?.method || 'get').toUpperCase();
+    const url = originalRequest?.url || '<unknown>';
+    if (!error.response) {
+      errorReporter.report(
+        `kind=network_error method=${method} url=${url} req_id=${reqId} code=${error.code || 'unknown'}`,
+      );
+    } else if (status === 504) {
+      // Tag 504 separately so the bundle line makes the root cause obvious
+      // (proxy / upstream timeout vs. backend 500 crash).
+      errorReporter.report(
+        `kind=upstream_timeout method=${method} url=${url} req_id=${reqId} status=504`,
+      );
+    } else if (typeof status === 'number' && status >= 500) {
+      const body = typeof error.response.data === 'string'
+        ? error.response.data
+        : JSON.stringify(error.response.data ?? '');
+      errorReporter.report(
+        `kind=server_5xx method=${method} url=${url} req_id=${reqId} status=${status} body=${body.slice(0, 500)}`,
+      );
+    }
+  } catch {
+    /* never let breadcrumb reporting break the rejection path */
+  }
   return Promise.reject(error);
 }
 

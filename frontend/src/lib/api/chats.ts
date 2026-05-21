@@ -9,6 +9,7 @@ import axios from 'axios';
 import type { StudioSignal } from '../../components/studio/types';
 import { API_BASE_URL } from './client';
 import { createLogger } from '@/lib/logger';
+import { errorReporter } from '@/lib/errorReporter';
 import { getAccessToken } from '../auth/session';
 import type { CostTracking } from './projects';
 import type { UserUsage } from './settings';
@@ -453,6 +454,23 @@ class ChatsAPI {
       }
     } catch (error) {
       log.error({ err: error }, 'failed to stream message');
+      // Breadcrumb so the support bundle correlates a disconnect with the
+      // matching backend SSE close. The fields mirror the existing
+      // log.warn in ChatPanel.tsx so backend + frontend lines speak the
+      // same shape. User-initiated aborts (AbortError) aren't bugs — the
+      // user clicked Stop / unmounted the tab — so we skip them.
+      const isAbort =
+        error instanceof DOMException && error.name === 'AbortError';
+      if (!isAbort) {
+        try {
+          errorReporter.report(
+            `kind=sse_failure chat_id=${chatId} had_user_message=${state.hadUserMessage} had_assistant_delta=${state.hadAssistantDelta}`,
+            error,
+          );
+        } catch {
+          /* never let breadcrumb reporting break the throw path */
+        }
+      }
       throw error;
     } finally {
       reader.releaseLock();
@@ -554,6 +572,18 @@ class ChatsAPI {
       );
     } catch (error) {
       log.warn({ err: error }, 'failed to signal stop (proceeding with abort)');
+      // Customer-reported "stop doesn't work" was previously invisible in
+      // the bundle — the abort() that follows hides the symptom from
+      // backend.log. Breadcrumb each timeout so the bundle records one
+      // line per occurrence.
+      try {
+        const axiosErr = error as { code?: string };
+        if (axiosErr?.code === 'ECONNABORTED') {
+          errorReporter.report(`kind=stop_timeout chat_id=${chatId}`);
+        }
+      } catch {
+        /* never let breadcrumb reporting break the stop path */
+      }
     }
   }
 

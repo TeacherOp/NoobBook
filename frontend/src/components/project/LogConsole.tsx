@@ -11,14 +11,16 @@
  * surfaces stay in lockstep behaviorally — they only differ in framing
  * (Dialog vs settings page).
  *
- * The console panel is virtualised via react-window's List + the v2
- * `useDynamicRowHeight` hook. With Delta-scale logs (200–500 entries
- * including occasional stack traces) the previous plain-`map()` render
- * mounted every row up front; virtualisation drops the DOM cost to the
- * visible window + a small overscan regardless of total line count.
+ * Rendering note: we use a plain `<ul>{lines.map(...)}</ul>` rather
+ * than virtualisation. The earlier react-window v2 attempt had a
+ * first-paint window where dynamic row heights hadn't been measured
+ * yet — for multi-line stack-trace / WARNING rows that showed up as
+ * visible overlap. With the default fetch of 500 lines × ~6 DOM
+ * nodes/row the total node count is well under what modern browsers
+ * lay out in a frame, so the virtualisation wasn't earning its
+ * keep. Plain rendering is rock-solid and the perf budget is fine.
  */
-import React, { useEffect, useRef } from 'react';
-import { List, useDynamicRowHeight, type RowComponentProps } from 'react-window';
+import React from 'react';
 import {
   ArrowsClockwise,
   CircleNotch,
@@ -179,41 +181,18 @@ const FilterRow: React.FC<{
   </div>
 );
 
-/**
- * Default row height in pixels for an info-only line. Stack-trace rows
- * grow above this; useDynamicRowHeight measures and caches the actual
- * height on first render so subsequent renders are at the real size.
- */
-const DEFAULT_ROW_HEIGHT = 56;
-
 const ConsolePanel: React.FC<{
   lines: LogLine[];
   loading: boolean;
   logFilePresent: boolean;
   panelMaxHeightClassName: string;
 }> = ({ lines, loading, logFilePresent, panelMaxHeightClassName }) => {
-  // The hook keeps a per-index height cache that ResizeObserver
-  // populates as rows mount. We intentionally do NOT pass a `key`
-  // prop: a key change resets the entire cache, which makes every
-  // row snap back to DEFAULT_ROW_HEIGHT for the frame between reset
-  // and the next ResizeObserver tick — visually that shows up as
-  // multi-line rows briefly overlapping the rows below them. The
-  // live-tail poll appends new rows at the end every 30 s, and
-  // filter switches re-render each row's inner content; in both
-  // cases ResizeObserver fires on the affected rows and the cache
-  // self-corrects without a flicker. See the docstring of
-  // `useDynamicRowHeight` in react-window v2 — the observer is
-  // specifically designed to handle content re-renders.
-  const rowHeight = useDynamicRowHeight({
-    defaultRowHeight: DEFAULT_ROW_HEIGHT,
-  });
-
   const showEmpty = !loading && lines.length === 0;
   const showLoading = loading && lines.length === 0;
 
   return (
     <div className="rounded-lg border border-stone-800/60 bg-stone-900 text-stone-100 font-mono text-[12px] leading-relaxed shadow-inner overflow-hidden">
-      <div className={`${panelMaxHeightClassName} relative`}>
+      <div className={`${panelMaxHeightClassName} overflow-y-auto`}>
         {showLoading ? (
           <div className="h-48 flex items-center justify-center text-stone-400">
             <CircleNotch size={16} className="mr-2 animate-spin" />
@@ -227,18 +206,11 @@ const ConsolePanel: React.FC<{
         ) : showEmpty ? (
           <EmptyState title="All quiet." body="No matching lines for this filter." />
         ) : (
-          <List
-            // The List wants to size itself to its container — we give
-            // it `height: 100%` via inline style + a defaultHeight that
-            // matches the typical panel size for SSR / initial paint.
-            style={{ height: '100%', width: '100%' }}
-            defaultHeight={Math.min(lines.length * DEFAULT_ROW_HEIGHT, 600)}
-            rowCount={lines.length}
-            rowHeight={rowHeight}
-            overscanCount={4}
-            rowComponent={LogRow}
-            rowProps={{ lines, rowHeight }}
-          />
+          <ul className="divide-y divide-stone-800/80">
+            {lines.map((line, i) => (
+              <LogRow key={`${line.ts}-${i}`} line={line} />
+            ))}
+          </ul>
         )}
       </div>
     </div>
@@ -296,73 +268,37 @@ const ActionRow: React.FC<{
   </div>
 );
 
-interface LogRowProps {
-  lines: LogLine[];
-  /**
-   * Passed through from `useDynamicRowHeight`. We forward each row's
-   * outer element to `observeRowElements` so the list resizes correctly
-   * when a stack-trace row is taller than the default.
-   */
-  rowHeight: ReturnType<typeof useDynamicRowHeight>;
-}
-
-// Plain function signature (not React.FC) so the return type lines up
-// with react-window's `rowComponent` requirement: ReactElement | null,
-// not the React.FC default of ReactNode | undefined.
-function LogRow({
-  index,
-  style,
-  ariaAttributes,
-  lines,
-  rowHeight,
-}: RowComponentProps<LogRowProps>) {
-  const line = lines[index];
-  const wrapperRef = useRef<HTMLDivElement>(null);
-
-  // Track the actual rendered height. The hook unsubscribes via the
-  // returned cleanup on unmount; ResizeObserver handles wrap-changes
-  // inside the row (e.g. responsive narrowing on small modals).
-  useEffect(() => {
-    if (!wrapperRef.current) return;
-    return rowHeight.observeRowElements([wrapperRef.current]);
-  }, [rowHeight]);
-
-  if (!line) return null;
+const LogRow: React.FC<{ line: LogLine }> = ({ line }) => {
   const isError = line.level === 'ERROR' || line.level === 'CRITICAL';
   const isWarn = line.level === 'WARNING';
   return (
-    <div style={style} {...ariaAttributes}>
-      <div
-        ref={wrapperRef}
-        className="px-4 py-2.5 hover:bg-stone-800/40 transition-colors border-b border-stone-800/80"
-      >
-        <div className="flex items-center gap-2 text-[11px] tracking-tight">
-          <span className="text-stone-500 tabular-nums">{line.ts}</span>
-          <span
-            className={[
-              'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm uppercase tracking-[0.06em] text-[10px] font-semibold',
-              isError
-                ? 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30'
-                : isWarn
-                  ? 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30'
-                  : 'bg-stone-700/40 text-stone-400 ring-1 ring-stone-600/30',
-            ].join(' ')}
-          >
-            {isError ? (
-              <XCircle size={10} weight="fill" />
-            ) : isWarn ? (
-              <Warning size={10} weight="fill" />
-            ) : null}
-            {line.level}
-          </span>
-          <span className="text-stone-400 truncate" title={line.logger}>
-            {line.logger}
-          </span>
-        </div>
-        <pre className="mt-1 whitespace-pre-wrap break-words text-stone-100 text-[12px] leading-relaxed font-mono pl-[3px]">
-          {line.message}
-        </pre>
+    <li className="px-4 py-2.5 hover:bg-stone-800/40 transition-colors">
+      <div className="flex items-center gap-2 text-[11px] tracking-tight">
+        <span className="text-stone-500 tabular-nums">{line.ts}</span>
+        <span
+          className={[
+            'inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm uppercase tracking-[0.06em] text-[10px] font-semibold',
+            isError
+              ? 'bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30'
+              : isWarn
+                ? 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30'
+                : 'bg-stone-700/40 text-stone-400 ring-1 ring-stone-600/30',
+          ].join(' ')}
+        >
+          {isError ? (
+            <XCircle size={10} weight="fill" />
+          ) : isWarn ? (
+            <Warning size={10} weight="fill" />
+          ) : null}
+          {line.level}
+        </span>
+        <span className="text-stone-400 truncate" title={line.logger}>
+          {line.logger}
+        </span>
       </div>
-    </div>
+      <pre className="mt-1 whitespace-pre-wrap break-words text-stone-100 text-[12px] leading-relaxed font-mono pl-[3px]">
+        {line.message}
+      </pre>
+    </li>
   );
 };

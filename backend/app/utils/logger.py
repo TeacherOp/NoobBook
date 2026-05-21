@@ -81,9 +81,15 @@ def setup_logging(log_level: str = "DEBUG") -> None:
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         LOG_FILE = LOG_DIR / "backend.log"
 
+        # Cap at 2 MB / 5 archives (10 MB total). The previous 5 MB cap
+        # produced files large enough that the legacy whole-file logs
+        # reader took 200 ms+ on slower Docker mounts. The admin UI now
+        # uses a backward-block tail reader, so per-file size matters
+        # less for read latency — but smaller archives also keep the
+        # support bundle download snappy.
         file_handler = RotatingFileHandler(
             str(LOG_FILE),
-            maxBytes=5 * 1024 * 1024,
+            maxBytes=2 * 1024 * 1024,
             backupCount=5,
             encoding="utf-8",
         )

@@ -70,6 +70,8 @@ export const LogsModal: React.FC<LogsModalProps> = ({ open, onOpenChange, canCle
             onDownload={state.handleDownload}
             onClear={state.handleClear}
             canClear={canClear}
+            paused={state.paused}
+            onTogglePaused={state.setPaused}
           />
         </div>
 

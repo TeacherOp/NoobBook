@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
 from flask import Response, current_app, g, jsonify, request
 
@@ -41,12 +42,23 @@ _LINE_RE = re.compile(
 )
 
 
-def _read_recent_lines(limit: int, levels: set[str]) -> list[dict[str, Any]]:
+_TAIL_BLOCK_BYTES = 64 * 1024
+
+
+def _read_recent_lines(
+    limit: int,
+    levels: set[str],
+    since: Optional[str] = None,
+) -> list[dict[str, Any]]:
     """Tail the active log file and return matching structured lines.
 
-    Reads the whole file once — at 5MB max it's quick and avoids the
-    seek-from-end gymnastics that need careful handling around line
-    boundaries and UTF-8 multibyte chars.
+    Reads the whole file once — kept as the safety fallback in case the
+    backward-block tail reader raises on a malformed file. The main path
+    is `_tail_lines` below, which is O(requested) instead of O(file size)
+    and dominates the open-modal latency.
+
+    The optional ``since`` is an "HH:MM:SS" or longer timestamp prefix;
+    matching is lexical (the file's timestamps are already "HH:MM:SS").
     """
     if not logger_module.LOG_FILE or not logger_module.LOG_FILE.exists():
         return []
@@ -54,17 +66,23 @@ def _read_recent_lines(limit: int, levels: set[str]) -> list[dict[str, Any]]:
     matched: list[dict[str, Any]] = []
     pending: dict[str, Any] | None = None
 
+    def _flush(entry: dict[str, Any] | None) -> None:
+        if not entry or entry["level"] not in levels:
+            return
+        if since is not None and entry["ts"] <= since:
+            return
+        matched.append(entry)
+
     try:
         with logger_module.LOG_FILE.open("r", encoding="utf-8", errors="replace") as f:
             for raw in f:
                 line = raw.rstrip("\n")
                 m = _LINE_RE.match(line)
                 if m:
-                    if pending and pending["level"] in levels:
-                        matched.append(pending)
-                        if len(matched) > limit * 4:
-                            # Trim early to keep memory bounded on large files.
-                            matched = matched[-limit:]
+                    _flush(pending)
+                    if len(matched) > limit * 4:
+                        # Trim early to keep memory bounded on large files.
+                        matched = matched[-limit:]
                     pending = {
                         "ts": m.group("ts"),
                         "level": m.group("level"),
@@ -76,8 +94,7 @@ def _read_recent_lines(limit: int, levels: set[str]) -> list[dict[str, Any]]:
                     # Continuation of the previous structured line (stack trace etc.)
                     if pending is not None:
                         pending["message"] += "\n" + redact_line(line)
-            if pending and pending["level"] in levels:
-                matched.append(pending)
+            _flush(pending)
     except Exception as exc:
         logger.exception("Failed to read log file: %s", exc)
         return []
@@ -85,10 +102,151 @@ def _read_recent_lines(limit: int, levels: set[str]) -> list[dict[str, Any]]:
     return matched[-limit:]
 
 
+def _tail_lines(
+    path: Path,
+    limit: int,
+    levels: set[str],
+    since: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Tail-read the log file in 64 KB blocks from the end.
+
+    Stops as soon as we've collected ``limit`` matching anchor lines.
+    Anchor lines are those that start with the structured "HH:MM:SS [LEVEL] ..."
+    prefix — continuation lines (stack-trace bodies) are folded into the
+    previous anchor's ``message`` when we stitch the buffer forward.
+
+    Why a backward tail reader: the previous full-file path was
+    O(file size) per request. On Delta's prod box that's measurable
+    (200ms+ on slow Docker mounts under load) and the modal pays it on
+    every open. This version is O(requested) — typically 1–3 blocks.
+
+    The function is best-effort: on any unexpected error the caller
+    falls back to ``_read_recent_lines`` which preserves the original
+    whole-file behaviour.
+
+    ``since`` is matched lexically against the "HH:MM:SS" timestamp.
+    When set, the loop also stops the moment a candidate anchor's
+    timestamp is <= ``since`` AND we've already crossed into earlier
+    records — this is the "live tail" fast-path used by the 30 s poll.
+    """
+    file_size = path.stat().st_size
+    if file_size == 0 or limit <= 0:
+        return []
+
+    matched: list[dict[str, Any]] = []
+    # ``carry`` holds the leading partial line of the more-recently-read
+    # (later) block: the next (earlier) block ends mid-line, and that
+    # partial belongs to the line whose head lives in the earlier block.
+    # So on each iteration we read [earlier_pos, current_pos) and append
+    # ``carry`` to recover the full line at the boundary.
+    carry = b""
+
+    with path.open("rb") as f:
+        pos = file_size
+        while pos > 0 and len(matched) < limit:
+            read_size = min(_TAIL_BLOCK_BYTES, pos)
+            pos -= read_size
+            f.seek(pos)
+            block = f.read(read_size) + carry
+            carry = b""
+
+            if pos > 0:
+                # We didn't reach the file head — the first line in
+                # `block` may be a partial. Stash it for the next
+                # (earlier) iteration; keep only the complete lines.
+                first_newline = block.find(b"\n")
+                if first_newline < 0:
+                    # No newline anywhere in this block: it's all one
+                    # partial line, push everything to carry and keep
+                    # reading earlier blocks.
+                    carry = block
+                    continue
+                carry = block[: first_newline + 1]
+                block = block[first_newline + 1 :]
+            # At pos == 0 we have the entire head of the file in
+            # `block` — no partial-line stripping needed.
+
+            chunk_text = block.decode("utf-8", errors="replace")
+            anchors = _parse_block_anchors(chunk_text)
+            # Anchors come back in file (chronological) order; walk in
+            # reverse so we accumulate newest first and can stop early
+            # once we hit ``limit`` matches.
+            for entry in reversed(anchors):
+                if since is not None and entry["ts"] <= since:
+                    # Crossed into already-seen territory — done.
+                    return list(reversed(matched))
+                if entry["level"] in levels:
+                    matched.append(entry)
+                    if len(matched) >= limit:
+                        break
+
+    return list(reversed(matched))
+
+
+def _parse_block_anchors(text: str) -> list[dict[str, Any]]:
+    """Parse a UTF-8 chunk into a list of anchor entries with stitched
+    continuation lines. Returned in chronological (file) order."""
+    entries: list[dict[str, Any]] = []
+    pending: dict[str, Any] | None = None
+    for raw in text.splitlines():
+        m = _LINE_RE.match(raw)
+        if m:
+            if pending is not None:
+                entries.append(pending)
+            pending = {
+                "ts": m.group("ts"),
+                "level": m.group("level"),
+                "logger": m.group("logger"),
+                "req_id": m.group("req_id") or "",
+                "message": redact_line(m.group("message")),
+            }
+        else:
+            if pending is not None:
+                pending["message"] += "\n" + redact_line(raw)
+    if pending is not None:
+        entries.append(pending)
+    return entries
+
+
+def _get_recent_lines(
+    limit: int,
+    levels: set[str],
+    since: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Public entry point: try the fast tail reader first, fall back to
+    the whole-file scan on any unexpected error. The fallback preserves
+    the legacy behaviour so a malformed file or transient I/O glitch
+    can't black-hole the logs viewer."""
+    log_file = logger_module.LOG_FILE
+    if not log_file or not log_file.exists():
+        return []
+    try:
+        return _tail_lines(log_file, limit, levels, since=since)
+    except Exception as exc:
+        logger.warning(
+            "Tail reader failed (%s) — falling back to whole-file scan", exc
+        )
+        return _read_recent_lines(limit, levels, since=since)
+
+
 @logs_bp.route("/logs/recent", methods=["GET"])
 @require_auth
 def get_recent_logs():
-    """Return last N error/warning lines as JSON. `?level=all` includes INFO/DEBUG."""
+    """Return last N error/warning lines as JSON.
+
+    Query params:
+      - ``n``     : max anchor lines to return (1..1000, default 100).
+      - ``level`` : ``errors`` (default) | ``warnings`` | ``all``.
+      - ``since`` : optional "HH:MM:SS" or longer prefix. Returns only
+                    lines whose timestamp is strictly greater than this.
+                    Drives the 30 s incremental "live tail" poll from the
+                    LogsModal — the client passes the newest timestamp it
+                    already has, and we read just enough from the tail
+                    to satisfy the request.
+
+    The hard 1000-line cap still applies even with ``since``, so a stale
+    ``since`` can't dump the whole file in one shot.
+    """
     try:
         limit = int(request.args.get("n", 100))
     except ValueError:
@@ -103,7 +261,14 @@ def get_recent_logs():
     else:
         levels = {"ERROR", "CRITICAL"}
 
-    lines = _read_recent_lines(limit, levels)
+    since_raw = (request.args.get("since") or "").strip() or None
+    # Defensive: timestamps in the log file are "HH:MM:SS". Reject
+    # anything that doesn't look that way so a client bug can't slip in
+    # a value that defeats the comparison silently.
+    if since_raw and not re.match(r"^\d{2}:\d{2}:\d{2}", since_raw):
+        since_raw = None
+
+    lines = _get_recent_lines(limit, levels, since=since_raw)
     return jsonify(
         {
             "success": True,

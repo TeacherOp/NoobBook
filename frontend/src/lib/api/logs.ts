@@ -38,10 +38,22 @@ export interface LogHousekeeping {
 }
 
 export const logsAPI = {
-  async getRecent(n = 100, level: 'errors' | 'warnings' | 'all' = 'errors') {
-    const res = await api.get<RecentLogsResponse>('/logs/recent', {
-      params: { n, level },
-    });
+  /**
+   * Fetch recent log lines.
+   *
+   * ``since`` is an optional "HH:MM:SS" prefix — pass the newest
+   * timestamp the client already holds to make the backend return
+   * just the lines that landed after it. This is what the live-tail
+   * poll uses so each 30 s tick reads at most a few KB.
+   */
+  async getRecent(
+    n = 100,
+    level: 'errors' | 'warnings' | 'all' = 'errors',
+    opts: { since?: string } = {},
+  ) {
+    const params: Record<string, string | number> = { n, level };
+    if (opts.since) params.since = opts.since;
+    const res = await api.get<RecentLogsResponse>('/logs/recent', { params });
     return res.data;
   },
 

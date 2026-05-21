@@ -128,6 +128,8 @@ export const LogsSection: React.FC = () => {
         onCopy={state.handleCopy}
         onDownload={state.handleDownload}
         onClear={state.handleClear}
+        paused={state.paused}
+        onTogglePaused={state.setPaused}
       />
 
       <DownloadLogsConfirmDialog

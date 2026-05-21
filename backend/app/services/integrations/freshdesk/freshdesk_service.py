@@ -151,8 +151,18 @@ class FreshdeskService:
             auth = HTTPBasicAuth(self._api_key, "X")
             headers = {"Content-Type": "application/json"}
 
+            call_t0 = time.monotonic()
             response = requests.get(
                 url, auth=auth, headers=headers, params=params, timeout=30
+            )
+            # Per-call summary so mid-sync failures are diagnosable from
+            # the bundle alone. Sync runs at the batch level above; this is
+            # the per-HTTP-call line.
+            log_level = logger.info if response.status_code == 200 else logger.warning
+            log_level(
+                "FRESHDESK_API endpoint=%s status=%s ms=%d",
+                endpoint, response.status_code,
+                int((time.monotonic() - call_t0) * 1000),
             )
 
             # Preemptive rate limit pause — sleep before we exhaust the limit

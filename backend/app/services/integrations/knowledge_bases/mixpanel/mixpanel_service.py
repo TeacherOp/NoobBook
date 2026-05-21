@@ -11,6 +11,7 @@ Lazy singleton pattern mirroring jira_service.
 import json
 import logging
 import os
+import time as _time
 from collections import defaultdict
 from datetime import date, timedelta
 from math import ceil
@@ -101,6 +102,19 @@ class MixpanelService:
         url = f"{self._base_url}/{endpoint.lstrip('/')}"
         headers = {"Accept": "application/json"}
 
+        call_t0 = _time.monotonic()
+
+        def _log(status: int, body_chars: int) -> None:
+            """Per-call summary so a 'Mixpanel feels broken' report can be
+            traced to the specific endpoint + status. Body content is not
+            logged — just its length."""
+            ms = int((_time.monotonic() - call_t0) * 1000)
+            level = logger.info if status == 200 else logger.warning
+            level(
+                "MIXPANEL_API endpoint=%s status=%s ms=%d body_chars=%d",
+                endpoint, status, ms, body_chars,
+            )
+
         try:
             if method == "GET":
                 response = requests.get(
@@ -112,6 +126,8 @@ class MixpanelService:
                 )
             else:
                 return {"success": False, "error": f"Unsupported HTTP method: {method}"}
+
+            _log(response.status_code, len(response.text or ""))
 
             if response.status_code == 200:
                 try:
@@ -149,10 +165,16 @@ class MixpanelService:
                 "error": f"Mixpanel API error: {response.status_code} - {response.text[:200]}",
             }
         except requests.exceptions.Timeout:
+            _log(0, 0)
+            logger.warning("MIXPANEL_API endpoint=%s error=timeout", endpoint)
             return {"success": False, "error": "Mixpanel request timed out."}
         except requests.exceptions.ConnectionError:
+            _log(0, 0)
+            logger.warning("MIXPANEL_API endpoint=%s error=connection", endpoint)
             return {"success": False, "error": "Could not connect to Mixpanel API."}
         except Exception as e:
+            _log(0, 0)
+            logger.warning("MIXPANEL_API endpoint=%s error=%s", endpoint, type(e).__name__)
             return {"success": False, "error": f"Request failed: {str(e)}"}
 
     # --- Tool methods ---

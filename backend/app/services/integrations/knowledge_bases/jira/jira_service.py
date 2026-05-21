@@ -7,6 +7,7 @@ client initialization and environment-based configuration.
 """
 import logging
 import os
+import time as _time
 from typing import Dict, Any, Optional, List
 import requests
 from requests.auth import HTTPBasicAuth
@@ -108,6 +109,7 @@ class JiraService:
                 "error": "Jira not configured. Please add JIRA_EMAIL, JIRA_API_KEY, and either JIRA_CLOUD_ID (new) or JIRA_DOMAIN (legacy) to .env"
             }
 
+        call_t0 = _time.monotonic()
         try:
             url = f"{self._base_url}/{endpoint}"
             headers = {'Accept': 'application/json'}
@@ -119,6 +121,16 @@ class JiraService:
                 response = requests.post(url, auth=self._auth, headers=headers, json=json_data, timeout=30)
             else:
                 return {"success": False, "error": f"Unsupported HTTP method: {method}"}
+
+            # Per-call summary so a Jira issue ("search returns nothing")
+            # is debuggable from the bundle alone. Body content isn't
+            # logged — only its length.
+            log_level = logger.info if response.status_code == 200 else logger.warning
+            log_level(
+                "JIRA_API endpoint=%s method=%s status=%s ms=%d",
+                endpoint, method, response.status_code,
+                int((_time.monotonic() - call_t0) * 1000),
+            )
 
             # Handle response codes
             if response.status_code == 200:
@@ -138,10 +150,13 @@ class JiraService:
                 }
 
         except requests.exceptions.Timeout:
+            logger.warning("JIRA_API endpoint=%s method=%s error=timeout", endpoint, method)
             return {"success": False, "error": "Request timed out. Jira server might be slow or unreachable"}
         except requests.exceptions.ConnectionError:
+            logger.warning("JIRA_API endpoint=%s method=%s error=connection", endpoint, method)
             return {"success": False, "error": "Connection failed. Check JIRA_DOMAIN and network connectivity"}
         except Exception as e:
+            logger.warning("JIRA_API endpoint=%s method=%s error=%s", endpoint, method, type(e).__name__)
             return {"success": False, "error": f"Request failed: {str(e)}"}
 
     def list_projects(self, search_query: Optional[str] = None, limit: int = 50) -> Dict[str, Any]:

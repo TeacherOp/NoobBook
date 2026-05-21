@@ -137,8 +137,8 @@ class ClaudeService:
                     raise
                 wait = (2 ** attempt) * 2
                 logger.warning(
-                    "API timeout/connection error (attempt %d/%d), retrying in %ds: %s",
-                    attempt + 1, max_retries, wait, e,
+                    "CLAUDE_RETRY attempt=%d/%d reason=%s wait_ms=%d detail=%s",
+                    attempt + 1, max_retries, type(e).__name__, wait * 1000, e,
                 )
                 time.sleep(wait)
             except APIStatusError as e:
@@ -148,8 +148,8 @@ class ClaudeService:
                         raise
                     wait = (attempt + 1) * 30
                     logger.warning(
-                        "Rate limit/overloaded %d (attempt %d/%d), retrying in %ds",
-                        status, attempt + 1, max_retries, wait,
+                        "CLAUDE_RETRY attempt=%d/%d reason=rate_limit_%d wait_ms=%d",
+                        attempt + 1, max_retries, status, wait * 1000,
                     )
                     time.sleep(wait)
                 elif status in _SERVER_ERROR_CODES:
@@ -157,8 +157,8 @@ class ClaudeService:
                         raise
                     wait = (2 ** attempt) * 2
                     logger.warning(
-                        "Server error %d (attempt %d/%d), retrying in %ds",
-                        status, attempt + 1, max_retries, wait,
+                        "CLAUDE_RETRY attempt=%d/%d reason=server_%d wait_ms=%d",
+                        attempt + 1, max_retries, status, wait * 1000,
                     )
                     time.sleep(wait)
                 else:
@@ -350,6 +350,7 @@ class ClaudeService:
         short_name = (last_user_msg[:80] + "...") if isinstance(last_user_msg, str) and len(last_user_msg) > 80 else last_user_msg
         trace_name = str(short_name) if short_name else "noobbook_llm_call"
         trace_input = {"prompt": last_user_msg, "model": model, "message_count": len(messages)}
+        call_t0 = time.monotonic()
         response = self._run_tracked(
             lambda: self._call_with_retry(lambda: client.messages.create(**api_params)),
             opik_kwargs=opik_kwargs,
@@ -361,6 +362,21 @@ class ClaudeService:
         # default to 0 so non-cached calls behave exactly as before.
         cache_creation_tokens = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
         cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+
+        # Single success line per Claude call so a customer turn reads as a
+        # contiguous story in the bundle. Opik already captures these fields
+        # but backend.log is what we ship in support bundles. Counts only —
+        # we never log the prompt or response body here.
+        logger.info(
+            "CLAUDE_CALL model=%s ms=%d in_tok=%d out_tok=%d cache_read=%d cache_create=%d stop=%s",
+            response.model,
+            int((time.monotonic() - call_t0) * 1000),
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            response.stop_reason,
+        )
 
         # Track costs if project_id provided (also per-chat if chat_id set)
         if project_id:
@@ -456,10 +472,28 @@ class ClaudeService:
         short_name = (last_user_msg[:80] + "...") if isinstance(last_user_msg, str) and len(last_user_msg) > 80 else last_user_msg
         trace_name = str(short_name) if short_name else "noobbook_llm_call"
         trace_input = {"prompt": last_user_msg, "model": model, "message_count": len(messages)}
+        # Pair of start/done lines (one per stream, NOT per delta) — the
+        # interesting failure mode is "stream went away mid-response", so a
+        # missing _DONE matched to a _START tells the story.
+        logger.info(
+            "CLAUDE_STREAM_START model=%s msg_count=%d", model, len(messages)
+        )
+        call_t0 = time.monotonic()
         response = self._run_tracked(_do_stream, opik_kwargs=opik_kwargs, trace_input=trace_input, trace_name=trace_name)
 
         cache_creation_tokens = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
         cache_read_tokens = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+
+        logger.info(
+            "CLAUDE_STREAM_DONE model=%s ms=%d in_tok=%d out_tok=%d cache_read=%d cache_create=%d stop=%s",
+            response.model,
+            int((time.monotonic() - call_t0) * 1000),
+            response.usage.input_tokens,
+            response.usage.output_tokens,
+            cache_read_tokens,
+            cache_creation_tokens,
+            response.stop_reason,
+        )
 
         if project_id:
             add_cost_usage(

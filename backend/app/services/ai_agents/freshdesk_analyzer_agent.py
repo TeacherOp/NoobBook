@@ -7,6 +7,7 @@ return_ticket_analysis to terminate with structured output.
 """
 
 import logging
+import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
 
@@ -140,7 +141,10 @@ class FreshdeskAnalyzerAgent:
                 }
 
             for iteration in range(1, self.MAX_ITERATIONS + 1):
-                logger.info("[FreshdeskAgent:%s] Iteration %d", execution_id, iteration)
+                iter_t0 = time.monotonic()
+                logger.info(
+                    "FRESHDESK_AGENT_ITER exec=%s iter=%d", execution_id, iteration
+                )
                 # Per-iteration heartbeat. Tells the user "still working" even
                 # when the tool a given iteration runs is fast enough to not
                 # produce its own progress event below. Without this the user
@@ -226,8 +230,14 @@ class FreshdeskAnalyzerAgent:
                             tool=tool_name,
                         )
 
+                    tool_t0 = time.monotonic()
                     result, is_term = freshdesk_executor.execute_tool(
                         tool_name, tool_input, project_id, source_id,
+                    )
+                    logger.info(
+                        "FRESHDESK_AGENT_TOOL exec=%s iter=%d name=%s ms=%d",
+                        execution_id, iteration, tool_name,
+                        int((time.monotonic() - tool_t0) * 1000),
                     )
 
                     if tool_name == "query_runner" and tool_input.get("sql_query"):
@@ -258,6 +268,15 @@ class FreshdeskAnalyzerAgent:
                     })
 
                 messages.append({"role": "user", "content": tool_results})
+
+                logger.info(
+                    "FRESHDESK_AGENT_ITER_DONE exec=%s iter=%d in_tok=%d out_tok=%d ms=%d terminated=%s",
+                    execution_id, iteration,
+                    usage.get("input_tokens", 0) or 0,
+                    usage.get("output_tokens", 0) or 0,
+                    int((time.monotonic() - iter_t0) * 1000),
+                    terminated,
+                )
 
                 if terminated and termination_result:
                     return {

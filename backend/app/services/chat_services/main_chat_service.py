@@ -14,6 +14,7 @@ Message Flow:
 The service uses message_service for all message handling and tool parsing.
 """
 import logging
+import time
 from typing import Dict, Any, Tuple, List, Optional, Callable, Union
 
 
@@ -517,6 +518,20 @@ class MainChatService:
         Shared chat runner for both non-streaming and streaming flows.
         """
         resolved_user_id = self._resolve_user_id(user_id)
+        turn_t0 = time.monotonic()
+
+        # Lifecycle log: one line per chat turn so a customer report is
+        # greppable end-to-end via the req_id. has_image / source_count
+        # come from the user payload + chat row (set after the fetch
+        # below); we emit the START line as soon as we have them so the
+        # bundle ordering matches Claude / tool / iter lines that follow.
+        has_image = (
+            isinstance(user_message_text, list)
+            and any(
+                isinstance(b, dict) and b.get("type") == "image"
+                for b in user_message_text
+            )
+        )
 
         # Verify chat exists
         chat = chat_service.get_chat(project_id, chat_id)
@@ -591,7 +606,23 @@ class MainChatService:
             user_id=resolved_user_id,
         )
 
+        logger.info(
+            "CHAT_TURN_START chat_id=%s project_id=%s source_count=%d selected=%s has_image=%s tools=%d",
+            chat_id,
+            str(project_id)[:8],
+            len(active_sources),
+            "all" if selected_source_ids is None else len(selected_source_ids),
+            has_image,
+            len(tools),
+        )
+
         accumulated_text_parts: List[str] = []
+        # Aggregated usage across all Claude calls inside this turn, surfaced
+        # in CHAT_TURN_DONE so a single line summarises the cost of the turn.
+        turn_in_tokens = 0
+        turn_out_tokens = 0
+        iteration = 0
+        response: Dict[str, Any] = {}
 
         try:
             # Step 4: Build messages and call Claude
@@ -618,6 +649,9 @@ class MainChatService:
             )
             if response_text.strip():
                 accumulated_text_parts.append(response_text)
+            initial_usage = response.get("usage") or {}
+            turn_in_tokens += initial_usage.get("input_tokens", 0) or 0
+            turn_out_tokens += initial_usage.get("output_tokens", 0) or 0
 
             # Step 5: Handle tool use loop
             # Educational Note: When Claude wants to use tools, stop_reason is "tool_use".
@@ -625,7 +659,6 @@ class MainChatService:
             # Important: Claude can respond with text + tool_use together. The text is
             # the response to the user, the tool_use is for background processing.
             # We accumulate text from all responses so we don't lose it.
-            iteration = 0
             # Track the most recent non-empty tool-result batch so we can
             # surface it to the user if the synthesis fallback also fails
             # to coax text out of Claude — sub-agent output is way more
@@ -634,6 +667,14 @@ class MainChatService:
 
             while claude_parsing_utils.is_tool_use(response) and iteration < self.MAX_TOOL_ITERATIONS:
                 iteration += 1
+                iter_t0 = time.monotonic()
+                iter_tool_names = [
+                    b.get("name") for b in claude_parsing_utils.extract_tool_use_blocks(response)
+                ]
+                logger.info(
+                    "CHAT_ITER iter=%d chat=%s model=%s tools=%s",
+                    iteration, chat_id, response.get("model"), iter_tool_names,
+                )
 
                 # Bail out of the agent loop if the SSE client disconnected
                 # (user clicked Stop). Skips further tool executions and the
@@ -688,6 +729,7 @@ class MainChatService:
                     tool_name = tool_block.get("name")
                     tool_input = tool_block.get("input", {})
 
+                    tool_t0 = time.monotonic()
                     try:
                         result = self._execute_tool(
                             project_id,
@@ -704,6 +746,21 @@ class MainChatService:
                         logger.error(f"Tool execution failed for {tool_name}: {tool_error}")
                         result = f"Tool execution failed: {str(tool_error)}"
                         is_error = True
+                    # Never log the tool input/result body — only the shape.
+                    # `input_keys` + `result_chars` are enough to reproduce
+                    # the call shape from the bundle without leaking content
+                    # that `redact_line` would otherwise have to scrub.
+                    input_keys = (
+                        sorted(tool_input.keys())
+                        if isinstance(tool_input, dict) else []
+                    )
+                    result_chars = len(result) if isinstance(result, str) else -1
+                    logger.info(
+                        "TOOL_EXEC iter=%d name=%s input_keys=%s ms=%d result_chars=%d success=%s",
+                        iteration, tool_name, input_keys,
+                        int((time.monotonic() - tool_t0) * 1000),
+                        result_chars, not is_error,
+                    )
 
                     tool_results_for_persist.append({
                         "tool_use_id": tool_id,
@@ -753,6 +810,17 @@ class MainChatService:
                 )
                 if response_text.strip():
                     accumulated_text_parts.append(response_text)
+                iter_usage = response.get("usage") or {}
+                iter_in = iter_usage.get("input_tokens", 0) or 0
+                iter_out = iter_usage.get("output_tokens", 0) or 0
+                turn_in_tokens += iter_in
+                turn_out_tokens += iter_out
+                logger.info(
+                    "CHAT_ITER_DONE iter=%d chat=%s stop_reason=%s in_tok=%d out_tok=%d ms=%d",
+                    iteration, chat_id, response.get("stop_reason"),
+                    iter_in, iter_out,
+                    int((time.monotonic() - iter_t0) * 1000),
+                )
 
             # Step 6: Store final text response
             # Educational Note: When Claude sends text + tool_use, the text comes first.
@@ -992,6 +1060,14 @@ class MainChatService:
                     "sync": self._build_sync_payload(project_id, chat_id, resolved_user_id),
                 },
             )
+
+        logger.info(
+            "CHAT_TURN_DONE chat=%s iters=%d total_in_tok=%d total_out_tok=%d total_ms=%d stop=%s",
+            chat_id, iteration,
+            turn_in_tokens, turn_out_tokens,
+            int((time.monotonic() - turn_t0) * 1000),
+            response.get("stop_reason") if isinstance(response, dict) else None,
+        )
 
         # Step 7: Sync chat index
         chat_service.sync_chat_to_index(project_id, chat_id)

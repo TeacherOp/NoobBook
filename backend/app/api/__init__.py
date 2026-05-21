@@ -58,6 +58,28 @@ _REQ_ID_HEADER = "X-Request-Id"
 # code-review). 1..64 chars matches the previous max length.
 _REQ_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
+# Per-request lifecycle log allowlist. We deliberately skip the high-rate
+# pollers (/active-tasks, /health, /auth/me) — those fire every few
+# seconds and would otherwise dominate the file. Everything else that
+# mutates state (POST/PUT/DELETE) or touches chats/sources/projects gets
+# a REQ_START + REQ_DONE pair so a customer-reported turn is greppable
+# end-to-end via the req_id.
+_LIFECYCLE_SKIP_SUFFIXES = ("/active-tasks", "/health", "/auth/me")
+_LIFECYCLE_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+_LIFECYCLE_GET_PREFIXES = ("/chats", "/sources", "/projects", "/messages")
+
+
+def _should_log_lifecycle(method: str, path: str) -> bool:
+    """True if this request gets the REQ_START / REQ_DONE pair."""
+    for suffix in _LIFECYCLE_SKIP_SUFFIXES:
+        if path.endswith(suffix):
+            return False
+    if method in _LIFECYCLE_MUTATING_METHODS:
+        return True
+    if method == "GET":
+        return any(seg in path for seg in _LIFECYCLE_GET_PREFIXES)
+    return False
+
 
 @api_bp.before_request
 def _attach_request_id():
@@ -80,6 +102,23 @@ def _attach_request_id():
         g.req_id = uuid.uuid4().hex[:16]  # 16 hex chars = 64 bits = plenty
     g._t0 = time.monotonic()
 
+    if _should_log_lifecycle(request.method, request.path):
+        # Short user prefix (first 8 hex of the UUID) keeps the line scannable
+        # while still distinguishing users when the same path is hit by many.
+        # Falls back to "-" before authenticate_request runs / for share routes.
+        ua_user = getattr(g, "user_id", None)
+        if ua_user:
+            ua_user = str(ua_user)[:8]
+        else:
+            ua_user = "-"
+        # Best-effort first IP from X-Forwarded-For; trim to 32 chars to
+        # cover IPv6 without bloating the line.
+        ip = (request.headers.get("X-Forwarded-For", "") or request.remote_addr or "").split(",")[0].strip()
+        logger.info(
+            "REQ_START method=%s path=%s user=%s ip=%s",
+            request.method, request.path, ua_user, ip[:32],
+        )
+
 
 @api_bp.after_request
 def _emit_request_id_and_timing(response):
@@ -98,6 +137,21 @@ def _emit_request_id_and_timing(response):
             logger.warning(
                 "SLOW_REQUEST method=%s path=%s status=%s elapsed=%.2fs",
                 request.method, request.path, response.status_code, elapsed,
+            )
+        if _should_log_lifecycle(request.method, request.path):
+            # Pair with REQ_START so a customer turn reads as one block
+            # under the req_id. `len` is the response content length when
+            # known; -1 if streaming / chunked so the lifecycle log still
+            # makes sense for SSE endpoints.
+            try:
+                body_len = int(response.headers.get("Content-Length", -1))
+            except (TypeError, ValueError):
+                body_len = -1
+            level_fn = logger.warning if elapsed >= 1.0 else logger.info
+            level_fn(
+                "REQ_DONE method=%s path=%s status=%s ms=%d len=%d",
+                request.method, request.path, response.status_code,
+                int(elapsed * 1000), body_len,
             )
     return response
 

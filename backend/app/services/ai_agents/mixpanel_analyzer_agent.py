@@ -9,6 +9,7 @@ terminate with structured output.
 
 import json
 import logging
+import time
 import uuid
 from datetime import date, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -242,7 +243,10 @@ class MixpanelAnalyzerAgent:
         consecutive_errors = 0
 
         for iteration in range(1, self.MAX_ITERATIONS + 1):
-            logger.info("[MixpanelAgent:%s] Iteration %d", execution_id, iteration)
+            iter_t0 = time.monotonic()
+            logger.info(
+                "MIXPANEL_AGENT_ITER exec=%s iter=%d", execution_id, iteration
+            )
             self._emit_progress(
                 on_event,
                 f"Analyzing Mixpanel data (step {iteration})…",
@@ -322,7 +326,13 @@ class MixpanelAnalyzerAgent:
                 elif tool_name == self.TERMINATION_TOOL:
                     self._emit_progress(on_event, "Compiling findings…", iteration=iteration, tool=tool_name)
 
+                tool_t0 = time.monotonic()
                 result, is_term = self._execute_tool(tool_name, tool_input)
+                logger.info(
+                    "MIXPANEL_AGENT_TOOL exec=%s iter=%d name=%s ms=%d",
+                    execution_id, iteration, tool_name,
+                    int((time.monotonic() - tool_t0) * 1000),
+                )
 
                 # Record each non-termination call for the audit trail
                 # surfaced in the executor's return payload.
@@ -358,6 +368,15 @@ class MixpanelAnalyzerAgent:
                 )
 
             messages.append({"role": "user", "content": tool_results})
+
+            logger.info(
+                "MIXPANEL_AGENT_ITER_DONE exec=%s iter=%d in_tok=%d out_tok=%d ms=%d terminated=%s",
+                execution_id, iteration,
+                usage.get("input_tokens", 0) or 0,
+                usage.get("output_tokens", 0) or 0,
+                int((time.monotonic() - iter_t0) * 1000),
+                terminated,
+            )
 
             if terminated and termination_result:
                 return {

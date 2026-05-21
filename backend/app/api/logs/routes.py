@@ -44,6 +44,48 @@ _LINE_RE = re.compile(
 
 _TAIL_BLOCK_BYTES = 64 * 1024
 
+# Wrap tolerance for the `since` comparison. The log format stores
+# "HH:MM:SS" with no date, so a naive lexical compare loses across
+# midnight: ``"00:00:01" <= "23:59:55"`` is True, which would make the
+# live tail miss every post-midnight entry until the user hit Refresh.
+# We treat a backwards gap of more than this many seconds as "the
+# entry wrapped past midnight and is actually newer than `since`".
+# 12 h is the usual heuristic: a single deployment writing log lines
+# more than half a day apart is so rare in practice that it's
+# acceptable to defer to the manual Refresh path in that case.
+_WRAP_TOLERANCE_SECONDS = 12 * 3600
+
+
+def _ts_to_seconds(ts: str) -> Optional[int]:
+    """Parse an ``HH:MM:SS`` string to seconds-since-midnight. Returns
+    ``None`` on malformed input so the caller can fall back to a safe
+    inclusion default (i.e. don't drop the entry just because we
+    couldn't parse its timestamp)."""
+    try:
+        h_s, m_s, s_s = ts.split(":", 2)
+        # The seconds field can carry a trailing fractional component
+        # in some formatters — strip anything after the first 2 chars.
+        return int(h_s) * 3600 + int(m_s) * 60 + int(s_s[:2])
+    except (ValueError, IndexError):
+        return None
+
+
+def _ts_strictly_after(ts: str, since: str) -> bool:
+    """Return True iff ``ts`` is newer than ``since``, handling the
+    midnight rollover case where the log format's pure ``HH:MM:SS``
+    timestamp can lexically compare smaller across midnight."""
+    if ts > since:
+        return True
+    ts_secs = _ts_to_seconds(ts)
+    since_secs = _ts_to_seconds(since)
+    if ts_secs is None or since_secs is None:
+        # Treat malformed input as "potentially newer" so we err on
+        # the side of showing the user the entry. Manual Refresh
+        # remains the safety net.
+        return False
+    backwards_gap = since_secs - ts_secs
+    return backwards_gap > _WRAP_TOLERANCE_SECONDS
+
 
 def _read_recent_lines(
     limit: int,
@@ -69,7 +111,7 @@ def _read_recent_lines(
     def _flush(entry: dict[str, Any] | None) -> None:
         if not entry or entry["level"] not in levels:
             return
-        if since is not None and entry["ts"] <= since:
+        if since is not None and not _ts_strictly_after(entry["ts"], since):
             return
         matched.append(entry)
 
@@ -100,6 +142,40 @@ def _read_recent_lines(
         return []
 
     return matched[-limit:]
+
+
+def _find_first_anchor_offset(block: bytes) -> Optional[int]:
+    """Return the byte offset of the first complete anchor line in
+    ``block``, or ``None`` if no anchor is found.
+
+    "Anchor line" = a line whose start matches ``_LINE_RE`` (i.e. the
+    structured ``HH:MM:SS [LEVEL] logger [req:...]: message`` prefix).
+
+    We always skip the *first* line in the block because — when the
+    caller is reading mid-file (``pos > 0``) — that line may be a
+    partial whose head bytes live in the previous (earlier) block.
+    After that we walk newline-by-newline and return the offset of
+    the first complete anchor."""
+    first_nl = block.find(b"\n")
+    if first_nl < 0:
+        return None
+    cursor = first_nl + 1
+    block_len = len(block)
+    while cursor < block_len:
+        next_nl = block.find(b"\n", cursor)
+        line_end = block_len if next_nl < 0 else next_nl
+        # Decode just this candidate line — cheaper than decoding the
+        # whole block when the first anchor is near the top.
+        try:
+            line = block[cursor:line_end].decode("utf-8", errors="replace")
+        except Exception:  # pragma: no cover — defensive
+            line = ""
+        if _LINE_RE.match(line):
+            return cursor
+        if next_nl < 0:
+            break
+        cursor = next_nl + 1
+    return None
 
 
 def _tail_lines(
@@ -151,20 +227,27 @@ def _tail_lines(
             carry = b""
 
             if pos > 0:
-                # We didn't reach the file head — the first line in
-                # `block` may be a partial. Stash it for the next
-                # (earlier) iteration; keep only the complete lines.
-                first_newline = block.find(b"\n")
-                if first_newline < 0:
-                    # No newline anywhere in this block: it's all one
-                    # partial line, push everything to carry and keep
-                    # reading earlier blocks.
+                # We didn't reach the file head — the first bytes in
+                # ``block`` may be (a) a partial line whose head lives
+                # in the previous (earlier) block, AND/OR (b) one or
+                # more continuation lines (stack-trace bodies) whose
+                # anchor lives in the earlier block. Stash both as
+                # ``carry`` so the next iteration appends them to the
+                # right anchor — splitting only at the first newline
+                # would silently drop the continuation lines because
+                # ``_parse_block_anchors`` discards continuations with
+                # no preceding anchor in the same chunk.
+                anchor_offset = _find_first_anchor_offset(block)
+                if anchor_offset is None:
+                    # No complete anchor line anywhere in this block.
+                    # Everything is orphan continuation/partial bytes;
+                    # push to carry and keep reading earlier blocks.
                     carry = block
                     continue
-                carry = block[: first_newline + 1]
-                block = block[first_newline + 1 :]
+                carry = block[:anchor_offset]
+                block = block[anchor_offset:]
             # At pos == 0 we have the entire head of the file in
-            # `block` — no partial-line stripping needed.
+            # ``block`` — no partial-line stripping needed.
 
             chunk_text = block.decode("utf-8", errors="replace")
             anchors = _parse_block_anchors(chunk_text)
@@ -172,7 +255,7 @@ def _tail_lines(
             # reverse so we accumulate newest first and can stop early
             # once we hit ``limit`` matches.
             for entry in reversed(anchors):
-                if since is not None and entry["ts"] <= since:
+                if since is not None and not _ts_strictly_after(entry["ts"], since):
                     # Crossed into already-seen territory — done.
                     return list(reversed(matched))
                 if entry["level"] in levels:

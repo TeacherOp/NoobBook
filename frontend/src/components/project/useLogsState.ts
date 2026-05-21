@@ -144,11 +144,21 @@ export function useLogsState({ active = true }: UseLogsStateOpts = {}) {
 
   // 30 s live-tail poll. Paused when the surface is closed, the user
   // explicitly toggled pause, or the tab is hidden (Page Visibility).
+  //
+  // We don't tear down + rebuild the interval on visibility changes;
+  // instead the per-tick closure checks `document.hidden` and short-
+  // circuits. That keeps the timer state machine simple and avoids
+  // re-creating intervals on every Cmd-Tab. The catch-up fetch on
+  // regaining focus is what gives the live tail its responsiveness
+  // without firing real GETs while the tab is hidden.
   useEffect(() => {
     if (!active || paused) return;
-    if (typeof document !== 'undefined' && document.hidden) return;
 
-    const id = window.setInterval(fetchSinceNewest, LIVE_TAIL_INTERVAL_MS);
+    const tick = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      void fetchSinceNewest();
+    };
+    const id = window.setInterval(tick, LIVE_TAIL_INTERVAL_MS);
     const onVis = () => {
       if (!document.hidden) {
         // Catch-up immediately on regaining focus so the user doesn't

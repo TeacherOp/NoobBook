@@ -173,6 +173,91 @@ class TestTailLines:
         )
 
 
+class TestMidnightWrap:
+    """The log format stores HH:MM:SS without a date, so a naive
+    lexical compare drops every post-midnight entry. ``_ts_strictly_after``
+    treats a backwards gap of more than 12 h as a midnight rollover."""
+
+    def test_post_midnight_entry_is_newer_than_pre_midnight_since(self):
+        # 00:00:01 must be considered newer than 23:59:55.
+        assert logs_routes._ts_strictly_after("00:00:01", "23:59:55") is True
+
+    def test_same_day_lexical_compare_still_works(self):
+        assert logs_routes._ts_strictly_after("10:00:05", "10:00:00") is True
+        assert logs_routes._ts_strictly_after("10:00:00", "10:00:05") is False
+
+    def test_small_backwards_gap_is_not_treated_as_wrap(self):
+        # 23:59:50 is older than 23:59:55 (5 s gap), not a wrap.
+        assert logs_routes._ts_strictly_after("23:59:50", "23:59:55") is False
+
+    def test_tail_reader_returns_post_midnight_entries_after_wrap(self, tmp_path):
+        path = tmp_path / "backend.log"
+        _write_log(
+            path,
+            [
+                _entry("ERROR", "23:59:30", "before"),
+                _entry("ERROR", "23:59:55", "boundary"),
+                _entry("ERROR", "00:00:01", "after midnight"),
+                _entry("ERROR", "00:00:05", "later"),
+            ],
+        )
+        result = logs_routes._tail_lines(
+            path, limit=10, levels=_ERROR_LEVELS, since="23:59:55"
+        )
+        # Pure lexical compare would return [] because "00:00:01" <= "23:59:55".
+        # Wrap-aware compare returns the two post-midnight entries.
+        assert [e["message"] for e in result] == ["after midnight", "later"]
+
+
+class TestCrossBlockStackTrace:
+    """A stack trace spanning two 64 KB blocks must arrive intact —
+    continuation lines that land at the start of a block (with their
+    anchor in the previous, earlier block) must ride along as carry
+    rather than being silently discarded."""
+
+    def test_stack_trace_continuations_ride_carry_across_block_boundary(
+        self, tmp_path, monkeypatch
+    ):
+        # Force a small block size so we can engineer the split exactly
+        # at the middle of a stack-trace record.
+        monkeypatch.setattr(logs_routes, "_TAIL_BLOCK_BYTES", 128)
+        path = tmp_path / "backend.log"
+
+        # Build a file where:
+        #   - The anchor with the stack trace is "near the end" of the
+        #     earlier block.
+        #   - Several continuation lines land in the later block.
+        #   - A separate anchor follows the continuation lines in the
+        #     later block.
+        # We pad with filler so the boundary lands inside the stack.
+        filler = [_entry("INFO", f"09:{i:02d}:00", "filler line " * 4) for i in range(2)]
+        stack_anchor = _entry("ERROR", "10:00:01", "boom: stack incoming")
+        stack_lines = [
+            "Traceback (most recent call last):",
+            '  File "x.py", line 1, in <module>',
+            "    raise RuntimeError('bad')",
+            "RuntimeError: bad",
+        ]
+        trailing_anchor = _entry("INFO", "10:00:02", "carrying on")
+        _write_log(path, filler + [stack_anchor, *stack_lines, trailing_anchor])
+
+        result = logs_routes._tail_lines(
+            path, limit=10, levels=_ERROR_LEVELS
+        )
+        assert len(result) == 1
+        msg = result[0]["message"]
+        # Every continuation line must be present — the previous bug
+        # silently dropped continuations that landed at the start of
+        # the later block.
+        for needle in (
+            "Traceback (most recent call last):",
+            '  File "x.py", line 1, in <module>',
+            "raise RuntimeError('bad')",
+            "RuntimeError: bad",
+        ):
+            assert needle in msg, f"Missing continuation line: {needle!r}"
+
+
 class TestGetRecentLinesFallback:
     """``_get_recent_lines`` should hand off to the whole-file scan
     when the tail reader raises — preserves the legacy behaviour."""

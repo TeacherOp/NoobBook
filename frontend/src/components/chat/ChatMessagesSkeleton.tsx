@@ -18,6 +18,7 @@
  * `aria-busy="true"` on the wrapper so screen readers announce
  * "loading" instead of reading the empty bubble divs aloud.
  */
+import React from 'react';
 import { Skeleton } from '../ui/skeleton';
 
 const MAX_BUBBLES = 6;

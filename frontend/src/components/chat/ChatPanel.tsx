@@ -228,10 +228,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     chatId: string,
     opts: { showSkeleton?: boolean } = {},
   ) => {
-    // `showSkeleton` is false for background refetches (event-driven
-    // refresh after an insight save, the `openChatId` deep-link path)
-    // where we don't want to wipe a stable view with placeholders.
-    // The explicit-switch path (`handleSelectChat`) passes true.
+    // `showSkeleton` is false by default for background refetches
+    // (event-driven refresh after an insight save) where we don't
+    // want to wipe a stable view with placeholders. Explicit
+    // navigation paths — `handleSelectChat`, `openChatId` deep-link,
+    // `handleDeleteChat` fallback, `handleNewChat` — all opt in
+    // by passing true.
     const showSkeleton = opts.showSkeleton ?? false;
     if (showSkeleton) setSwitchingChat(true);
     try {

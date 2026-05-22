@@ -8,7 +8,7 @@
 import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { Sparkle } from '@phosphor-icons/react';
 import axios from 'axios';
-import { Skeleton } from '../ui/skeleton';
+import { ChatMessagesSkeleton } from './ChatMessagesSkeleton';
 import { chatsAPI } from '@/lib/api/chats';
 import type { Chat, ChatMetadata, ChatSyncPayload, StudioSignal } from '@/lib/api/chats';
 import type { CostTracking } from '@/lib/api/projects';
@@ -74,6 +74,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   const [showChatList, setShowChatList] = useState(false);
   const [allChats, setAllChats] = useState<ChatMetadata[]>([]);
   const [loading, setLoading] = useState(true);
+  // Per-chat-switch loading. Distinct from `loading` (project mount,
+  // fires once on first render); this one fires for the click →
+  // fetch-resolve window on every chat switch so the message list
+  // shows a skeleton instead of the previous chat lingering then
+  // popping. Suppressed for the mid-send recover path so an in-flight
+  // conversation doesn't flicker.
+  const [switchingChat, setSwitchingChat] = useState(false);
+  // Cached `message_count` of the chat we're switching INTO so the
+  // skeleton can size itself before `activeChat` lands. Captured at
+  // click time from the sidebar's `allChats` row. Default 4 matches
+  // the prior hand-rolled skeleton when count is unknown.
+  const targetMessageCountRef = useRef<number>(4);
   // Derive sending state for current chat from parent-owned Set
   const sending = activeChat ? sendingChatIds.has(activeChat.id) : false;
   const [exportingChat, setExportingChat] = useState(false);
@@ -212,7 +224,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
    * just-streamed assistant text. When `sendingLockRef` is held for this
    * chat we merge instead of replacing.
    */
-  const loadFullChat = async (chatId: string) => {
+  const loadFullChat = async (
+    chatId: string,
+    opts: { showSkeleton?: boolean } = {},
+  ) => {
+    // `showSkeleton` is false for background refetches (event-driven
+    // refresh after an insight save, the `openChatId` deep-link path)
+    // where we don't want to wipe a stable view with placeholders.
+    // The explicit-switch path (`handleSelectChat`) passes true.
+    const showSkeleton = opts.showSkeleton ?? false;
+    if (showSkeleton) setSwitchingChat(true);
     try {
       const chat = await chatsAPI.getChat(projectId, chatId);
       const midSend = sendingLockRef.current && activeChatIdRef.current === chatId;
@@ -230,6 +251,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     } catch (err) {
       log.error({ err }, 'failed to load chat');
       errorWithLogs('Failed to load chat');
+    } finally {
+      if (showSkeleton) setSwitchingChat(false);
     }
   };
 
@@ -242,7 +265,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
       const chats = await chatsAPI.listChats(projectId);
       setAllChats(chats);
 
-      // If we have chats and no active chat, load the first one
+      // If we have chats and no active chat, load the first one.
+      // No per-chat skeleton: the outer `loading` skeleton already
+      // covers this initial-mount path.
       if (chats.length > 0 && !activeChat) {
         await loadFullChat(chats[0].id);
       }
@@ -263,10 +288,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  // Switch to a specific chat when parent requests it (e.g. from ActiveTasksBar "Open" button)
+  // Switch to a specific chat when parent requests it (e.g. from
+  // ActiveTasksBar "Open" button). Treated as an explicit user-driven
+  // navigation — clear the current view and show the skeleton.
   useEffect(() => {
     if (openChatId && openChatId !== activeChat?.id) {
-      loadFullChat(openChatId);
+      const targetMeta = allChats.find((c) => c.id === openChatId);
+      targetMessageCountRef.current = targetMeta?.message_count ?? 4;
+      setActiveChat(null);
+      loadFullChat(openChatId, { showSkeleton: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openChatId]);
@@ -280,6 +310,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     const handler = (e: Event) => {
       const detail = (e as CustomEvent<{ chatId?: string }>).detail;
       if (detail?.chatId && detail.chatId === activeChatIdRef.current) {
+        // Background refetch (insight save, etc.) — keep the current
+        // view visible while we refresh. No skeleton flash.
         loadFullChat(detail.chatId);
       }
     };
@@ -1062,7 +1094,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     try {
       const newChat = await chatsAPI.createChat(projectId, 'New Chat');
       setAllChats((prev) => [newChat, ...prev]);
-      await loadFullChat(newChat.id);
+      // New chat has zero messages — the skeleton renders nothing,
+      // then the existing empty state takes over on fetch resolution.
+      targetMessageCountRef.current = 0;
+      setActiveChat(null);
+      await loadFullChat(newChat.id, { showSkeleton: true });
       // Backend pre-seeds selected_source_ids with the project's DB-type
       // sources on chat create (Sno 40 / #247); loadFullChat fetches that
       // selection and notifies parents via onActiveChatChange.
@@ -1101,10 +1137,22 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   }, []);
 
   /**
-   * Select a chat from the list
+   * Select a chat from the list.
+   *
+   * Clears the previous chat immediately so the message list shows a
+   * skeleton instead of the old chat lingering. The skeleton is sized
+   * from the sidebar's cached `message_count` (no extra fetch).
+   * Re-selecting the already-active chat is a no-op — no skeleton flash.
    */
   const handleSelectChat = async (chatId: string) => {
-    await loadFullChat(chatId);
+    if (chatId === activeChat?.id) {
+      setShowChatList(false);
+      return;
+    }
+    const targetMeta = allChats.find((c) => c.id === chatId);
+    targetMessageCountRef.current = targetMeta?.message_count ?? 4;
+    setActiveChat(null);
+    await loadFullChat(chatId, { showSkeleton: true });
     setShowChatList(false);
   };
 
@@ -1123,7 +1171,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         onActiveChatChange(null, []);
 
         if (remainingChats.length > 0) {
-          await loadFullChat(remainingChats[0].id);
+          // The user just deleted the active chat; fall-back to the
+          // next one is effectively a switch. Show the skeleton.
+          const fallback = remainingChats[0];
+          targetMessageCountRef.current = fallback.message_count ?? 4;
+          await loadFullChat(fallback.id, { showSkeleton: true });
         }
       }
       success('Chat deleted');
@@ -1203,29 +1255,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             Ask questions about your sources or request analysis
           </p>
         </div>
-        <div className="flex-1 p-6 space-y-4">
-          {/* Skeleton message bubbles mimicking a chat conversation */}
-          <div className="flex justify-end">
-            <Skeleton className="h-10 w-2/3 rounded-2xl" />
-          </div>
-          <div className="flex justify-start gap-3">
-            <Skeleton className="h-8 w-8 rounded-full flex-shrink-0" />
-            <div className="space-y-2 flex-1">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-5/6" />
-              <Skeleton className="h-4 w-3/4" />
-            </div>
-          </div>
-          <div className="flex justify-end">
-            <Skeleton className="h-8 w-1/2 rounded-2xl" />
-          </div>
-          <div className="flex justify-start gap-3">
-            <Skeleton className="h-8 w-8 rounded-full flex-shrink-0" />
-            <div className="space-y-2 flex-1">
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-4/5" />
-            </div>
-          </div>
+        <div className="flex-1 p-6">
+          {/* Reuses the same component the chat-switch path uses so the
+              two surfaces stay in lockstep visually. Default count
+              renders 4 alternating bubbles (matching the prior
+              hand-rolled markup). */}
+          <ChatMessagesSkeleton />
         </div>
         <ToastContainer toasts={toasts} onDismiss={dismissToast} />
       </div>
@@ -1276,7 +1311,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         exportingChat={exportingChat}
       />
 
-      {rawMode && activeChat ? (
+      {switchingChat ? (
+        // Chat-switch placeholder. Clears the previous chat's messages
+        // and shows skeleton bubbles sized by the sidebar's cached
+        // message_count so the surface stays alive while the new
+        // chat's getChat lands. See `handleSelectChat` for the click
+        // path; `recoverChatFromServer` and event-driven background
+        // refreshes intentionally bypass this so an active stream
+        // doesn't flicker.
+        <div className="flex-1 p-6 overflow-y-auto">
+          <ChatMessagesSkeleton count={targetMessageCountRef.current} />
+        </div>
+      ) : rawMode && activeChat ? (
         // Local ErrorBoundary: a syntax-highlighter chunk-load failure
         // shouldn't crash the entire chat panel — let the user click
         // back out of Raw mode and keep using the normal view. resetKey

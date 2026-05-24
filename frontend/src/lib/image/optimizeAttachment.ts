@@ -87,13 +87,15 @@ export async function optimizeAttachment(file: File): Promise<File> {
       if (!ctx) return file;
       ctx.drawImage(bitmap, 0, 0, dstW, dstH);
 
-      // For PNG inputs we have to decide between staying PNG
-      // (lossless, preserves alpha) and switching to JPEG (often
-      // 5–10× smaller for screenshots, but trashes any transparent
-      // regions). Sample a sparse grid for any non-opaque pixel —
+      // Decide between PNG output (lossless, preserves alpha) and
+      // JPEG (often 5–10× smaller for screenshots, but trashes any
+      // transparent regions — JPEG has no alpha channel and browsers
+      // composite transparent pixels against black during toBlob).
+      // PNG *and* WebP both carry alpha, so we sample for non-opaque
+      // pixels on either input format. Sampling a sparse grid is
       // cheap and accurate enough for "is this transparent?".
-      const isPng = mime === 'image/png';
-      const wantsAlpha = isPng && hasTransparency(ctx, dstW, dstH);
+      const mayHaveAlpha = mime === 'image/png' || mime === 'image/webp';
+      const wantsAlpha = mayHaveAlpha && hasTransparency(ctx, dstW, dstH);
       const outMime = wantsAlpha ? 'image/png' : 'image/jpeg';
 
       const blob = await new Promise<Blob | null>((resolve) => {
@@ -151,23 +153,25 @@ export async function optimizeAttachment(file: File): Promise<File> {
 }
 
 /**
- * Sparse alpha-channel sample. Walks an N×N grid across the canvas
- * and returns true if any sampled pixel is non-opaque. Sampling
- * 256 pixels catches any meaningful transparent region in a
- * screenshot while costing well under 1 ms even at 2048 × 2048.
+ * Sparse alpha-channel sample. Pulls the whole pixel buffer once
+ * (a single JS↔compositor round-trip) and then walks a 16×16 stride
+ * over the returned Uint8ClampedArray. The earlier per-pixel
+ * `getImageData(x, y, 1, 1)` form was the same logic but 256
+ * round-trips heavier — the bulk fetch is identical in accuracy and
+ * comfortably under 5 ms even at 2048×2048.
  */
 function hasTransparency(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
 ): boolean {
+  const { data } = ctx.getImageData(0, 0, w, h);
   const grid = 16;
   const stepX = Math.max(1, Math.floor(w / grid));
   const stepY = Math.max(1, Math.floor(h / grid));
   for (let y = 0; y < h; y += stepY) {
     for (let x = 0; x < w; x += stepX) {
-      const { data } = ctx.getImageData(x, y, 1, 1);
-      if (data[3] < 255) return true;
+      if (data[(y * w + x) * 4 + 3] < 255) return true;
     }
   }
   return false;

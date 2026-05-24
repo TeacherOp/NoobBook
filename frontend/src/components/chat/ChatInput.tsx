@@ -94,6 +94,19 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   // under that and we don't want a flash of UI per attachment.
   const [compressing, setCompressing] = useState(false);
 
+  // Ref-mirror of the current attachments array so the async path in
+  // `acceptFiles` reads the freshest list AFTER its `await`. Without
+  // this, two overlapping paste/drop gestures both captured the same
+  // initial `attachments` snapshot inside the closure and the second
+  // `onAttachmentsChange` overwrote the first — silently dropping
+  // the first batch. The ref is updated every render via the
+  // sync-effect below so it always reflects the parent's latest
+  // state by the time the await resolves.
+  const attachmentsRef = useRef(attachments);
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+
   // Display value combines typed message and partial transcript
   const displayMessage = partialTranscript
     ? message + (message && !message.endsWith(' ') ? ' ' : '') + partialTranscript
@@ -170,15 +183,27 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       }
       if (!accepted.length) return;
 
-      const next = [...attachments, ...accepted];
+      // Read the latest attachments list via the ref — the `attachments`
+      // prop captured in this closure is the snapshot from the render
+      // that fired off this acceptFiles call; if a second paste/drop
+      // started while the first was still in `await Promise.all`,
+      // using the prop would clobber the first batch.
+      const current = attachmentsRef.current;
+      const next = [...current, ...accepted];
       if (next.length > ATTACHMENT_MAX_COUNT) {
         onAttachmentError?.(
           `Maximum ${ATTACHMENT_MAX_COUNT} attachments per message — extras dropped.`,
         );
       }
-      onAttachmentsChange(next.slice(0, ATTACHMENT_MAX_COUNT));
+      const merged = next.slice(0, ATTACHMENT_MAX_COUNT);
+      // Update the ref synchronously so a *third* concurrent call sees
+      // this merge result, not the parent state that hasn't committed
+      // yet. React's setState is async; the ref is the only single
+      // source of truth across overlapping awaits.
+      attachmentsRef.current = merged;
+      onAttachmentsChange(merged);
     },
-    [attachments, onAttachmentsChange, onAttachmentError],
+    [onAttachmentsChange, onAttachmentError],
   );
 
   // Paste handler — clipboard images get pulled out as Files. We

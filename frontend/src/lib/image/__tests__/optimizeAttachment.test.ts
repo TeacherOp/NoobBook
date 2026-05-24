@@ -25,6 +25,23 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe('optimizeAttachment — concurrent calls are safe', () => {
+  it('two overlapping optimize calls return independent files', async () => {
+    // Regression for the stale-closure race in ChatInput.acceptFiles.
+    // optimizeAttachment itself takes a single File so it's
+    // structurally race-free — this is the safety net: the function
+    // must remain pure (no module-level mutable state).
+    const a = makeFile(100, 'image/jpeg', 'a.jpg');
+    const b = makeFile(100, 'image/jpeg', 'b.jpg');
+    const [outA, outB] = await Promise.all([
+      optimizeAttachment(a),
+      optimizeAttachment(b),
+    ]);
+    expect(outA).toBe(a);
+    expect(outB).toBe(b);
+  });
+});
+
 describe('optimizeAttachment — pass-through paths', () => {
   it('returns non-image files unchanged', async () => {
     const f = makeFile(2_000_000, 'application/pdf', 'doc.pdf');

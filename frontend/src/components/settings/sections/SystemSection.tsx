@@ -19,7 +19,6 @@ import type { AvailableTier } from '@/lib/api/settings';
 import { useToast } from '@/components/ui/use-toast';
 import { createLogger } from '@/lib/logger';
 import { useDevFlag } from '@/hooks/useDevFlag';
-import { useAuth } from '@/hooks/useAuth';
 
 const log = createLogger('system-section');
 
@@ -30,12 +29,12 @@ export const SystemSection: React.FC = () => {
   const [tierSaving, setTierSaving] = useState(false);
 
   const { success, error } = useToast();
-  const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
 
   // Dev-only: render the streaming tool-call Activity Feed above each
   // assistant turn. Backend always emits the events; the UI is gated
   // here so non-dev users see the existing reading indicator only.
+  // No role check needed — this entire section is admin-only at the
+  // AppSettings parent (see AppSettings.tsx 'system' case).
   const [activityFeedEnabled, setActivityFeedEnabled] = useDevFlag(
     'tool_activity_feed',
   );
@@ -91,35 +90,33 @@ export const SystemSection: React.FC = () => {
         </p>
       </div>
 
-      {isAdmin && (
-        <div>
-          <h3 className="text-sm font-semibold mb-3">Developer Tools</h3>
-          <div className="space-y-3 rounded-md border border-stone-200 bg-stone-50/60 p-3">
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-1">
-                <Label
-                  htmlFor="tool-activity-feed-toggle"
-                  className="text-sm font-medium"
-                >
-                  Tool-call activity feed
-                </Label>
-                <p className="text-xs text-muted-foreground max-w-md">
-                  Renders a live, expandable feed of every tool Claude calls
-                  during a chat turn — including nested analyzer agents. Useful
-                  for debugging prompts and tool flows. Stored per-browser; off
-                  by default. Admins only.
-                </p>
-              </div>
-              <Switch
-                id="tool-activity-feed-toggle"
-                checked={activityFeedEnabled}
-                onCheckedChange={setActivityFeedEnabled}
-                aria-label="Toggle tool-call activity feed"
-              />
+      <div>
+        <h3 className="text-sm font-semibold mb-3">Developer Tools</h3>
+        <div className="space-y-3 rounded-md border border-stone-200 bg-stone-50/60 p-3">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <Label
+                htmlFor="tool-activity-feed-toggle"
+                className="text-sm font-medium"
+              >
+                Tool-call activity feed
+              </Label>
+              <p className="text-xs text-muted-foreground max-w-md">
+                Renders a live, expandable feed of every tool Claude calls
+                during a chat turn — including nested analyzer agents. Useful
+                for debugging prompts and tool flows. Stored per-browser; off
+                by default.
+              </p>
             </div>
+            <Switch
+              id="tool-activity-feed-toggle"
+              checked={activityFeedEnabled}
+              onCheckedChange={setActivityFeedEnabled}
+              aria-label="Toggle tool-call activity feed"
+            />
           </div>
         </div>
-      )}
+      </div>
 
       <div>
         <h3 className="text-sm font-semibold mb-3">Processing Settings</h3>

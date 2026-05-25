@@ -22,6 +22,7 @@ from typing import Dict, Any
 
 import pandas as pd
 
+from app.services.integrations.supabase import storage_service
 from app.services.source_services.source_processing.csv_processor import process_csv
 
 logger = logging.getLogger(__name__)
@@ -86,5 +87,44 @@ def process_xlsx(
     # removes it on completion.
     csv_path = raw_file_path.with_suffix('.csv')
     csv_path.write_text(csv_text, encoding='utf-8')
+
+    # Also persist the converted CSV in the raw-files bucket as
+    # `{source_id}.csv`. The chat-side csv_analyzer downloads the data via
+    # `storage_service.download_raw_file(project_id, source_id, f"{source_id}.csv")`
+    # (analysis_executor.py:75-83). For native-CSV uploads that object
+    # lands there naturally at upload time; for XLSX-converted sources the
+    # only object in raw-files is `{source_id}.xlsx`, so without this step
+    # every chat question 404s and the analyzer falls back to a low-quality
+    # answer hallucinated from the source summary. Production logs from
+    # 2026-05-25 captured 5 sources hitting that loop before the user
+    # gave up and re-uploaded as .csv.
+    csv_bytes = csv_text.encode('utf-8')
+    try:
+        raw_csv_path = storage_service.upload_raw_file(
+            project_id=project_id,
+            source_id=source_id,
+            filename=f"{source_id}.csv",
+            file_data=csv_bytes,
+            content_type='text/csv; charset=utf-8',
+        )
+    except Exception as exc:
+        logger.error(
+            "Failed to upload converted CSV for XLSX source %s: %s",
+            source_id, exc,
+        )
+        raw_csv_path = None
+    if not raw_csv_path:
+        source_service.update_source(
+            project_id,
+            source_id,
+            status='error',
+            processing_info={
+                'error': (
+                    'Converted CSV could not be uploaded to storage. '
+                    'Retry the source or re-upload the XLSX.'
+                )
+            },
+        )
+        return {'success': False, 'error': 'Failed to upload converted CSV to storage'}
 
     return process_csv(project_id, source_id, source, csv_path, source_service)

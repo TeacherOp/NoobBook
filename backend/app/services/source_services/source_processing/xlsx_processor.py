@@ -98,21 +98,16 @@ def process_xlsx(
     # answer hallucinated from the source summary. Production logs from
     # 2026-05-25 captured 5 sources hitting that loop before the user
     # gave up and re-uploaded as .csv.
-    csv_bytes = csv_text.encode('utf-8')
-    try:
-        raw_csv_path = storage_service.upload_raw_file(
-            project_id=project_id,
-            source_id=source_id,
-            filename=f"{source_id}.csv",
-            file_data=csv_bytes,
-            content_type='text/csv; charset=utf-8',
-        )
-    except Exception as exc:
-        logger.error(
-            "Failed to upload converted CSV for XLSX source %s: %s",
-            source_id, exc,
-        )
-        raw_csv_path = None
+    # upload_raw_file catches all exceptions internally and returns None on
+    # failure (logging the cause with full context), so no try/except needed
+    # here — the None-check below is the only branch that can ever fire.
+    raw_csv_path = storage_service.upload_raw_file(
+        project_id=project_id,
+        source_id=source_id,
+        filename=f"{source_id}.csv",
+        file_data=csv_text.encode('utf-8'),
+        content_type='text/csv; charset=utf-8',
+    )
     if not raw_csv_path:
         source_service.update_source(
             project_id,

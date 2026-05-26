@@ -20,6 +20,28 @@ const log = createLogger('voice-recording');
 interface UseVoiceRecordingProps {
   onError: (message: string) => void;
   onTranscriptCommit: (text: string) => void;
+  /**
+   * Provider for biasing terms (project name, selected source
+   * filenames, etc.). Called fresh at each startRecording so the
+   * caller can read live state without re-binding the hook. Backend
+   * sanitises and caps the list to Scribe's limits (50 × ≤20 chars).
+   * Note: keyterms incur a 20% pricing premium per ElevenLabs docs,
+   * so callers should only pass terms that materially improve
+   * recognition for this user.
+   */
+  getKeyterms?: () => string[];
+  /**
+   * Called after the Haiku-polished version of the full voice session
+   * is available (always runs on stopRecording). Receives the raw
+   * concatenation of every committed chunk (joined with single spaces,
+   * matching how onTranscriptCommit appended them) and the cleaned
+   * result. Caller should locate the raw substring in their input
+   * value and replace it. Polish is best-effort: on backend failure,
+   * the callback fires with raw === cleaned (a no-op for the caller).
+   */
+  onVoiceSessionPolished?: (rawAccumulated: string, cleaned: string) => void;
+  /** Optional projectId passed through to /polish for cost tracking. */
+  projectId?: string;
 }
 
 interface UseVoiceRecordingReturn {
@@ -33,6 +55,9 @@ interface UseVoiceRecordingReturn {
 export const useVoiceRecording = ({
   onError,
   onTranscriptCommit,
+  getKeyterms,
+  onVoiceSessionPolished,
+  projectId,
 }: UseVoiceRecordingProps): UseVoiceRecordingReturn => {
   // State
   const [isRecording, setIsRecording] = useState(false);
@@ -46,6 +71,11 @@ export const useVoiceRecording = ({
   const websocketRef = useRef<WebSocket | null>(null);
   // Track if a commit was processed to avoid duplicate text insertion
   const commitProcessedRef = useRef<boolean>(false);
+  // Accumulator of every committed chunk from THIS recording session,
+  // joined exactly the way onTranscriptCommit appends to the input
+  // (single space separator). Used as the substring to replace when
+  // the polish round-trip returns. Reset at each startRecording.
+  const voiceChunksRef = useRef<string[]>([]);
 
   /**
    * Check if ElevenLabs transcription is configured on mount
@@ -64,7 +94,13 @@ export const useVoiceRecording = ({
   }, []);
 
   /**
-   * Stop recording and clean up resources
+   * Stop recording and clean up resources.
+   *
+   * If polish is enabled, fires-and-forgets a /polish call AFTER the
+   * final flush settles (500ms timeout below) and invokes
+   * onVoiceSessionPolished with the raw + cleaned text so the caller
+   * can swap the substring in their input. Polish runs async — the
+   * stop UI feedback is immediate.
    */
   const stopRecording = useCallback(() => {
     if (workletNodeRef.current) {
@@ -82,6 +118,28 @@ export const useVoiceRecording = ({
       mediaStreamRef.current = null;
     }
 
+    // Helper: after the final flush settles, kick off the polish
+    // round-trip and surface the cleaned result. Polish always runs —
+    // ElevenLabs `no_verbatim=true` is fast but not perfect, and this
+    // Haiku pass catches contextual fillers ("you know", "I mean")
+    // and false starts that the transcriber leaves in. Reads and
+    // resets voiceChunksRef so concurrent restarts don't double-polish.
+    const maybePolish = () => {
+      const chunks = voiceChunksRef.current.slice();
+      voiceChunksRef.current = [];
+      if (!onVoiceSessionPolished || chunks.length === 0) return;
+      // Match the same join the caller does in onTranscriptCommit:
+      // chunks are appended with a single leading space when the
+      // input doesn't already end in one. We reconstruct the same
+      // joined substring here so the caller can find it verbatim.
+      const raw = chunks.join(' ');
+      void chatsAPI.polishTranscript(raw, projectId).then((cleaned) => {
+        if (cleaned && cleaned !== raw) {
+          onVoiceSessionPolished(raw, cleaned);
+        }
+      });
+    };
+
     if (websocketRef.current) {
       if (websocketRef.current.readyState === WebSocket.OPEN) {
         websocketRef.current.send(JSON.stringify({
@@ -95,6 +153,7 @@ export const useVoiceRecording = ({
         setTimeout(() => {
           if (currentPartial && !commitProcessedRef.current) {
             log.debug('commit not processed, using partial fallback');
+            voiceChunksRef.current.push(currentPartial);
             onTranscriptCommit(currentPartial);
             setPartialTranscript('');
           }
@@ -103,21 +162,25 @@ export const useVoiceRecording = ({
             websocketRef.current.close();
             websocketRef.current = null;
           }
+          maybePolish();
         }, 500);
       } else {
         websocketRef.current.close();
         websocketRef.current = null;
+        maybePolish();
       }
-    }
-
-    if (partialTranscript && !websocketRef.current && !commitProcessedRef.current) {
+    } else if (partialTranscript && !commitProcessedRef.current) {
+      voiceChunksRef.current.push(partialTranscript);
       onTranscriptCommit(partialTranscript);
       setPartialTranscript('');
+      maybePolish();
+    } else {
+      maybePolish();
     }
 
     setIsRecording(false);
     log.debug('recording stopped');
-  }, [partialTranscript, onTranscriptCommit]);
+  }, [partialTranscript, onTranscriptCommit, onVoiceSessionPolished, projectId]);
 
   /**
    * Educational Note: Start capturing audio from microphone and stream to WebSocket.
@@ -226,10 +289,15 @@ export const useVoiceRecording = ({
     try {
       // Reset commit tracking for new recording session
       commitProcessedRef.current = false;
+      voiceChunksRef.current = [];
 
-      // Always fetch fresh config (token is single-use and expires)
+      // Always fetch fresh config (token is single-use and expires).
+      // Read keyterms at click time so the active project name and the
+      // currently-selected source filenames are accurate — the hook is
+      // mounted once per chat and selection can change after mount.
       log.debug('fetching transcription config');
-      const config = await chatsAPI.getTranscriptionConfig();
+      const keyterms = getKeyterms ? getKeyterms() : undefined;
+      const config = await chatsAPI.getTranscriptionConfig(keyterms);
       log.debug('connecting to WebSocket');
 
       // Connect to ElevenLabs WebSocket (token is in the URL)
@@ -258,6 +326,10 @@ export const useVoiceRecording = ({
           } else if (messageType === 'committed_transcript' && data.text) {
             // Mark that a commit was processed (prevents duplicate in stopRecording fallback)
             commitProcessedRef.current = true;
+            // Track for the polish round-trip on stop. Must record the
+            // EXACT text we hand to onTranscriptCommit so we can locate
+            // it as a substring of the input later.
+            voiceChunksRef.current.push(data.text);
             // Send committed text to parent
             onTranscriptCommit(data.text);
             setPartialTranscript('');

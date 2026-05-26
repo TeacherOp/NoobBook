@@ -20,9 +20,10 @@ Routes:
 - GET /transcription/config - Get WebSocket URL with fresh token
 - GET /transcription/status - Check if ElevenLabs is configured
 """
-from flask import jsonify, current_app
+from flask import jsonify, current_app, request
 from app.api.transcription import transcription_bp
 from app.services.integrations.elevenlabs import TranscriptionService
+from app.services.ai_services.voice_polish_service import voice_polish_service
 
 # Initialize service (lazy loads API key from env)
 transcription_service = TranscriptionService()
@@ -57,7 +58,17 @@ def get_transcription_config():
         }
     """
     try:
-        config = transcription_service.get_elevenlabs_config()
+        # Frontend can bias recognition by passing one or more
+        # `keyterms` params (repeatable in the query string, or a single
+        # comma-separated value as a fallback for clients that can't
+        # repeat params). Sanitization + caps happen service-side.
+        keyterms = request.args.getlist('keyterms')
+        if not keyterms:
+            raw = request.args.get('keyterms')
+            if raw:
+                keyterms = [t for t in raw.split(',') if t.strip()]
+
+        config = transcription_service.get_elevenlabs_config(keyterms=keyterms)
 
         return jsonify({
             'success': True,
@@ -113,4 +124,46 @@ def get_transcription_status():
         return jsonify({
             'success': False,
             'error': 'Failed to check transcription status'
+        }), 500
+
+
+@transcription_bp.route('/transcription/polish', methods=['POST'])
+def polish_transcript():
+    """
+    Final cleanup pass for a voice transcript.
+
+    Runs Haiku with a tight prompt to strip residual fillers, false
+    starts, and stuttering repetitions that ElevenLabs' `no_verbatim`
+    flag didn't catch. Preserves meaning, tone, and technical terms.
+    Returns the original text unchanged on any error so the UI can
+    fall back safely.
+
+    Body:
+        { "text": "...", "project_id": "..." (optional) }
+    Returns:
+        { "success": true, "cleaned": "..." }
+    """
+    try:
+        payload = request.get_json(silent=True) or {}
+        text = (payload.get('text') or '').strip()
+        if not text:
+            return jsonify({'success': True, 'cleaned': ''}), 200
+
+        project_id = payload.get('project_id') or None
+        user_id = payload.get('user_id') or None
+
+        cleaned = voice_polish_service.polish(
+            text=text,
+            project_id=project_id,
+            user_id=user_id,
+        )
+        return jsonify({'success': True, 'cleaned': cleaned}), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Error polishing transcript: {e}")
+        # Surface the failure so the frontend can decide to use raw,
+        # but never propagate a 500 that breaks the input box.
+        return jsonify({
+            'success': False,
+            'error': 'Failed to polish transcript',
         }), 500

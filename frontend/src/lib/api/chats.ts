@@ -717,14 +717,29 @@ class ChatsAPI {
    * Security Note: The API key never leaves the server - only the token
    * is embedded in the WebSocket URL for authentication.
    */
-  async getTranscriptionConfig(): Promise<{
+  async getTranscriptionConfig(
+    keyterms?: string[],
+  ): Promise<{
     websocket_url: string;
     model_id: string;
     sample_rate: number;
     encoding: string;
   }> {
     try {
-      const response = await axios.get(`${API_BASE_URL}/transcription/config`);
+      // Repeat ?keyterms=... for each term — matches Scribe's wire
+      // format and what the backend route's getlist('keyterms') reads.
+      const params = new URLSearchParams();
+      if (keyterms) {
+        for (const term of keyterms) {
+          const trimmed = term.trim();
+          if (trimmed) params.append('keyterms', trimmed);
+        }
+      }
+      const qs = params.toString();
+      const url = qs
+        ? `${API_BASE_URL}/transcription/config?${qs}`
+        : `${API_BASE_URL}/transcription/config`;
+      const response = await axios.get(url);
       if (response.data.success) {
         return {
           websocket_url: response.data.websocket_url,
@@ -738,6 +753,32 @@ class ChatsAPI {
     } catch (error) {
       log.error({ err: error }, 'failed to fetch transcription config');
       throw error;
+    }
+  }
+
+  /**
+   * Polish a raw voice transcript via the backend Haiku service.
+   * Returns the original text on any failure so the UI can fall back
+   * safely — voice cleanup is best-effort, never load-bearing.
+   *
+   * Should be called once at the end of a recording (e.g. inside
+   * stopRecording) to avoid mid-recording flicker. Adds ~300–700ms
+   * latency and a fraction-of-a-cent token cost per call.
+   */
+  async polishTranscript(text: string, projectId?: string): Promise<string> {
+    if (!text || !text.trim()) return text;
+    try {
+      const response = await axios.post(`${API_BASE_URL}/transcription/polish`, {
+        text,
+        project_id: projectId,
+      });
+      if (response.data?.success && typeof response.data?.cleaned === 'string') {
+        return response.data.cleaned;
+      }
+      return text;
+    } catch (error) {
+      log.error({ err: error }, 'polish transcript failed; using raw');
+      return text;
     }
   }
 

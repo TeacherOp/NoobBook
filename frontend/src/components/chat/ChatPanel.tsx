@@ -147,7 +147,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
   // Active sources count derived from per-chat selection
   const activeSources = selectedSourceIds.length;
 
-  // Voice recording hook
+  // Mirror project/source state into a ref so the voice-recording hook
+  // can read the LATEST keyterms at click-time without re-binding
+  // startRecording on every selection change. Identity-stable callback
+  // means the hook's internal useCallback chain stays cheap.
+  const keytermsSourceRef = useRef<{
+    projectName: string;
+    sources: Source[];
+    selectedSourceIds: string[];
+  }>({ projectName, sources: [], selectedSourceIds });
+  useEffect(() => {
+    keytermsSourceRef.current = { projectName, sources, selectedSourceIds };
+  });
+
+  // Voice recording hook. Polish always runs on stop — it's a
+  // baseline UX win, not a dev/opt-in feature.
   const {
     isRecording,
     partialTranscript,
@@ -164,6 +178,36 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
         }
         return prev + text;
       });
+    }, []),
+    onVoiceSessionPolished: useCallback((raw: string, cleaned: string) => {
+      // Swap the raw voice substring out for the cleaned version.
+      // We use lastIndexOf so any earlier identical text the user
+      // typed/voiced is preserved. If the raw can't be located
+      // (extremely unlikely — user edited the input mid-polish), no-op.
+      setMessage((prev) => {
+        const idx = prev.lastIndexOf(raw);
+        if (idx === -1) return prev;
+        return prev.slice(0, idx) + cleaned + prev.slice(idx + raw.length);
+      });
+    }, []),
+    projectId,
+    getKeyterms: useCallback(() => {
+      // Project name first so it's always retained when the backend
+      // truncates to Scribe's 50-term cap. Source filenames next, with
+      // common extensions stripped (the audio model never says ".pdf").
+      const { projectName: pn, sources: srcs, selectedSourceIds: sel } =
+        keytermsSourceRef.current;
+      const selectedSet = new Set(sel);
+      const stripExt = (name: string) =>
+        name.replace(/\.(pdf|docx?|pptx?|xlsx?|csv|txt|md|mp3|mp4|wav|m4a|webm|jpg|jpeg|png|gif)$/i, '');
+      const terms: string[] = [];
+      if (pn) terms.push(pn);
+      for (const s of srcs) {
+        if (!selectedSet.has(s.id)) continue;
+        const name = stripExt((s.name || '').trim());
+        if (name) terms.push(name);
+      }
+      return terms;
     }, []),
   });
 

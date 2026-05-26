@@ -24,6 +24,7 @@ from flask import jsonify, current_app, request
 from app.api.transcription import transcription_bp
 from app.services.integrations.elevenlabs import TranscriptionService
 from app.services.ai_services.voice_polish_service import voice_polish_service
+from app.services.auth.rbac import get_request_identity
 
 # Initialize service (lazy loads API key from env)
 transcription_service = TranscriptionService()
@@ -59,14 +60,16 @@ def get_transcription_config():
     """
     try:
         # Frontend can bias recognition by passing one or more
-        # `keyterms` params (repeatable in the query string, or a single
-        # comma-separated value as a fallback for clients that can't
-        # repeat params). Sanitization + caps happen service-side.
+        # `keyterms` params (repeatable in the query string). A single
+        # comma-separated value is accepted as a fallback for clients
+        # that can't repeat query params — detect by checking for an
+        # embedded comma in the lone element, since getlist() returns
+        # a one-element list `['a,b,c']` in that case (not an empty
+        # one — that earlier check never fired in practice).
+        # Sanitization + caps happen service-side.
         keyterms = request.args.getlist('keyterms')
-        if not keyterms:
-            raw = request.args.get('keyterms')
-            if raw:
-                keyterms = [t for t in raw.split(',') if t.strip()]
+        if len(keyterms) == 1 and ',' in keyterms[0]:
+            keyterms = [t for t in keyterms[0].split(',') if t.strip()]
 
         config = transcription_service.get_elevenlabs_config(keyterms=keyterms)
 
@@ -150,7 +153,12 @@ def polish_transcript():
             return jsonify({'success': True, 'cleaned': ''}), 200
 
         project_id = payload.get('project_id') or None
-        user_id = payload.get('user_id') or None
+        # Resolve user from the authenticated identity, not the request
+        # body. Reading user_id from JSON would let any caller misattribute
+        # Haiku cost to another user — and the frontend never sends it,
+        # so per-user tracking would be permanently broken besides.
+        identity = get_request_identity()
+        user_id = identity.user_id if identity.is_authenticated else None
 
         cleaned = voice_polish_service.polish(
             text=text,

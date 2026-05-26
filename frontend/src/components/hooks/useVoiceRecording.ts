@@ -361,7 +361,7 @@ export const useVoiceRecording = ({
       log.error({ err }, 'failed to start recording');
       onError('Failed to start transcription. Check API key in settings.');
     }
-  }, [onError, onTranscriptCommit, startAudioCapture, stopRecording]);
+  }, [onError, onTranscriptCommit, startAudioCapture, stopRecording, getKeyterms]);
 
   // Cleanup on unmount
   useEffect(() => {
